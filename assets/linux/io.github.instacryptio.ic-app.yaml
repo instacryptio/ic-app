@@ -1,0 +1,33 @@
+id: io.github.instacryptio.ic-app
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: ic_app
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --device=dri
+
+modules:
+  - name: golang
+    buildsystem: simple
+    build-commands:
+      - install -d /app/go
+      - cp -r . /app/go
+    sources:
+      - type: archive
+        url: https://go.dev/dl/go1.26.1.linux-amd64.tar.gz
+        sha256: FIXME
+        dest: .
+
+  - name: Instacrypt
+    buildsystem: simple
+    build-commands:
+      - export PATH=/app/go/bin:$PATH
+      - cd backend && CGO_ENABLED=1 go build -buildmode=c-shared -o /app/lib/libbackend.so .
+      - flutter build linux --release
+      - cp -r frontend/build/linux/x64/release/bundle/* /app/
+    sources:
+      - type: dir
+        path: .

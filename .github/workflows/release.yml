@@ -1,0 +1,336 @@
+name: Release
+
+# Build the Instacrypt desktop + Android apps and attach them to a published
+# GitHub Release. Everything is built through the `flugo` CLI (Flutter UI + Go
+# FFI backend). The desktop backend is a cgo c-shared lib that links YubiKey
+# (libykpers-1) + FIDO2 (libfido2) hardware-key support, so every desktop/Android
+# runner installs those native deps — same posture as ic-cli's release.yml.
+#
+# NOTE (first-cut / needs CI iteration): this workflow cannot be validated
+# locally (no Flutter/macOS/Windows here). The highest-risk spots are marked
+# `# RISK:` — expect to iterate on real runners, as ic-cli's workflow did.
+#
+# Trigger: publishing a Release via the web UI; workflow_dispatch re-runs against
+# an existing tag for testing (make a pre-release first — "published" fires for
+# pre-releases too).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag/release to build and attach artifacts to
+        required: true
+
+permissions:
+  contents: write
+
+# TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
+env:
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  FLUGO_VERSION: v0.1.2
+
+jobs:
+  # --- Linux amd64/arm64 -----------------------------------------------------
+  # Built INSIDE an ubuntu:22.04 container (glibc 2.35) on a supported 24.04
+  # runner, so the .tar.gz + .AppImage run on older distros (AppImageHub-friendly)
+  # without pinning the deprecating `ubuntu-22.04` runner label.
+  build-linux:
+    name: build Linux-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    container:
+      image: ubuntu:22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    env:
+      # appimagetool can't mount FUSE inside a container — run it extracted.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - name: Install toolchain (container is bare)
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git curl unzip zip xz-utils file ca-certificates build-essential \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libsecret-1-dev \
+            libykpers-1-dev libfido2-dev \
+            libfuse2 desktop-file-utils librsvg2-bin imagemagick
+          git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install flugo CLI
+        run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}
+
+      - name: Stamp version
+        run: bash .github/scripts/stamp-version.sh "${TAG#v}"
+
+      - name: Build + package
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          mkdir -p dist
+          # tar.gz is the guaranteed Linux artifact — build + copy it FIRST so an
+          # AppImage failure below can't cost us the tarball.
+          flugo build linux --release
+          flugo package linux
+          TAR="$(find frontend/build build -name '*.tar.gz' | head -1)"
+          test -n "$TAR"
+          cp "$TAR" "dist/Instacrypt-App-Linux-${{ matrix.arch }}-${TAG}.tar.gz"
+          # AppImage is best-effort (amd64; needs icons + appimagetool, and flugo
+          # hardcodes -x86_64 so arm64 is expected to skip). Non-fatal.
+          if ( flugo icons && flugo appimage && flugo build appimage ); then
+            AI="$(find build frontend/build -name '*.AppImage' | head -1 || true)"
+            [ -n "$AI" ] && cp "$AI" "dist/Instacrypt-App-Linux-${{ matrix.arch }}-${TAG}.AppImage"
+          else
+            echo "AppImage skipped/failed (expected on arm64 or missing tooling)"
+          fi
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: Linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  # --- macOS amd64 (Intel) + arm64 (Apple Silicon) ---------------------------
+  build-macos:
+    name: build macOS-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: macos-15-intel }  # last x86_64 image (to Aug 2027)
+          - { arch: arm64, runner: macos-26 }
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install native deps
+        run: |
+          brew untap aws/tap 2>/dev/null || true   # keep a security product's logs clean
+          brew install pkg-config ykpers libfido2 openssl@3
+
+      - name: Install flugo CLI
+        run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}
+
+      - name: Stamp version
+        run: bash .github/scripts/stamp-version.sh "${TAG#v}"
+
+      - name: Build + package (.dmg)
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          # Homebrew include/lib + keg-only openssl@3 aren't on the default search
+          # path; point cgo at them so libfido2 doesn't hit go-libfido2's static
+          # openssl@1.1 path (mirrors ic-cli).
+          BREW="$(brew --prefix)"; SSL="$(brew --prefix openssl@3)"; YK="$(brew --prefix ykpers)"
+          export PKG_CONFIG_PATH="$BREW/lib/pkgconfig:$BREW/share/pkgconfig:$SSL/lib/pkgconfig:$YK/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+          export CGO_CFLAGS="-I$BREW/include -I$SSL/include -I$YK/include"
+          export CGO_LDFLAGS="-L$BREW/lib -L$SSL/lib -L$YK/lib"
+          flugo build macos --release
+          APP="$(find frontend/build/macos -maxdepth 5 -name '*.app' -type d | head -1)"
+          test -n "$APP"
+          mkdir -p dist
+          # RISK: unsigned/un-notarized — Gatekeeper will warn (document
+          # `xattr -dr com.apple.quarantine`). Real signing needs an Apple account.
+          hdiutil create -volname "Instacrypt" -srcfolder "$APP" -ov -format UDZO \
+            "dist/Instacrypt-App-macOS-${{ matrix.arch }}-${TAG}.dmg"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: macOS-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  # --- Windows amd64 (MINGW64) + arm64 (CLANGARM64) --------------------------
+  # RISK (highest): the Go backend.dll is a cgo build needing mingw gcc/clang +
+  # ykpers/libfido2 (from MSYS2), while `flutter build windows` needs MSVC (from
+  # the runner's Visual Studio). Both toolchains must be visible to `flugo build
+  # windows`. This runs in pwsh with the MSYS2 bin on PATH and CC set for cgo;
+  # expect to iterate here.
+  build-windows:
+    name: build windows-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: windows-2025,   msystem: MINGW64,     prefix: mingw-w64-x86_64,        cc: gcc }
+          - { arch: arm64, runner: windows-11-arm, msystem: CLANGARM64,  prefix: mingw-w64-clang-aarch64, cc: clang }
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # MSYS2 provides the mingw C toolchain + hardware libs for the cgo backend.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          path-type: inherit   # keep Windows PATH (flutter/MSVC) visible too
+          install: >-
+            ${{ matrix.prefix }}-${{ matrix.cc }}
+            ${{ matrix.prefix }}-pkgconf
+            ${{ matrix.prefix }}-yubikey-personalization
+            ${{ matrix.prefix }}-libfido2
+
+      - name: Install flugo CLI
+        run: go install github.com/hkdb/flugo/cmd/flugo@$env:FLUGO_VERSION
+
+      - name: Stamp version (PowerShell)
+        shell: pwsh
+        run: |
+          $ver = "$env:TAG".TrimStart('v')
+          # Single-quote the '${1}' backref so it reaches the regex engine literally.
+          (Get-Content flugo.yaml) -replace '^(\s+)version:.*', ('${1}version: ' + $ver) | Set-Content flugo.yaml
+          (Get-Content frontend/pubspec.yaml) -replace '^version:.*', ("version: $ver+" + $env:GITHUB_RUN_NUMBER) | Set-Content frontend/pubspec.yaml
+
+      - name: Build + installer (.exe)
+        shell: pwsh
+        run: |
+          # Put the MSYS2 mingw bin on PATH so cgo finds gcc/clang + the HW libs,
+          # while flutter still sees MSVC from Visual Studio on the runner.
+          $env:PATH = "$env:RUNNER_TEMP\msys64\${{ matrix.msystem }}\bin;$env:PATH"
+          $env:CC = "${{ matrix.cc }}"
+          $env:PATH = "$env:PATH;$(go env GOPATH)\bin"
+          flugo build windows --release
+          $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release | Select-Object -First 1
+          if (-not $rel) { throw "windows Release dir not found" }
+          # RISK: Flutter Windows output is a folder; build a single installer .exe
+          # via Inno Setup. Unsigned (SmartScreen will warn).
+          choco install innosetup --no-progress -y
+          $ver = "$env:TAG".TrimStart('v')
+          $iss = @"
+          [Setup]
+          AppName=Instacrypt
+          AppVersion=$ver
+          DefaultDirName={autopf}\Instacrypt
+          DefaultGroupName=Instacrypt
+          OutputDir=dist
+          OutputBaseFilename=Instacrypt-App-windows-${{ matrix.arch }}-$env:TAG
+          ArchitecturesInstallIn64BitMode=x64compatible arm64
+          [Files]
+          Source: "$($rel.FullName)\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+          [Icons]
+          Name: "{group}\Instacrypt"; Filename: "{app}\ic_app.exe"
+          "@
+          $iss | Set-Content build-installer.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" build-installer.iss
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: windows-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  # --- Android APK (debug-signed for now) ------------------------------------
+  # flugo build android builds the backend per-ABI with the NDK clang
+  # (jniLibs/<abi>/libbackend.so) then `flutter build apk`. chalresp/fido2 are
+  # pure-Go stubs on android, so no ykpers/libfido2 — NDK is the only native need.
+  build-android:
+    name: build android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;27.0.12077973" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.0.12077973" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          cache: true
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install flugo CLI
+        run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}
+
+      - name: Stamp version
+        run: bash .github/scripts/stamp-version.sh "${TAG#v}"
+
+      - name: Build APK
+        run: |
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          # RISK: debug-signed (build.gradle.kts release uses the debug keystore).
+          # Release signing = generate a keystore + add ANDROID_KEYSTORE_* secrets
+          # + a release signingConfig (fast-follow).
+          flugo build android --release
+          APK="$(find frontend/build -name 'app-release.apk' | head -1)"
+          test -n "$APK"
+          mkdir -p dist
+          cp "$APK" "dist/Instacrypt-App-android-${TAG}.apk"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: android
+          path: dist/*
+          if-no-files-found: error
+
+  # --- Collect everything, checksum, attach to the release -------------------
+  # No `if:` — runs only when ALL build jobs succeed (matrices are fail-fast:
+  # false, so a job passes only if every arch in it passed). One failed target
+  # skips publish, leaving no partial release.
+  publish:
+    name: Upload assets + checksums
+    needs: [build-linux, build-macos, build-windows, build-android]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum Instacrypt-App-* > checksums.txt
+          echo "Built assets:"; cat checksums.txt
+
+      - name: Upload to release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${TAG}" Instacrypt-App-* checksums.txt --repo "${{ github.repository }}" --clobber

@@ -1,0 +1,67 @@
+# Shared lint config across icfx / ic-cli / ic-app.
+# Correctness-first: every enabled linter catches a real bug class. Style nits
+# (line length, comment punctuation, magic numbers, etc.) are deliberately
+# off so signal-to-noise stays high.
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  disable-all: true
+  enable:
+    # Default set — catches obvious bugs
+    - errcheck       # unchecked error returns
+    - gosimple       # code simplification opportunities
+    - govet          # standard `go vet` checks
+    - ineffassign    # assignments that are never read
+    - staticcheck    # comprehensive static analysis
+    - typecheck      # type-checking (always on by default)
+    - unused         # unused functions/vars/types
+    # Correctness extensions
+    - bodyclose      # HTTP response.Body must be closed
+    - errorlint      # use %w in fmt.Errorf, errors.Is/As over ==
+    - nilerr         # return nil after `if err != nil`
+    - unconvert      # unnecessary type conversions
+    - unparam        # unused function parameters
+    # Cheap style checks that are also correctness-adjacent
+    - gofmt          # standard formatting
+    - goimports      # import ordering / unused imports
+    - misspell       # English spelling errors in comments/strings
+    - whitespace     # trailing whitespace, leading blank lines
+
+linters-settings:
+  errcheck:
+    check-type-assertions: false
+    check-blank: false
+    exclude-functions:
+      - (*os.File).Close
+      - fmt.Fprintln
+      - fmt.Fprintf
+      - fmt.Fprint
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+  misspell:
+    locale: US
+
+issues:
+  # Tests can be looser — error-path coverage is the test's job, not its surface
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - unparam
+        - bodyclose
+    # Generated bridge code — not ours to fix
+    - path: bridge\.gen\.go
+      linters:
+        - errcheck
+        - unparam
+        - unused
+        - staticcheck
+        - gosimple
+  # Don't truncate output — we want to see everything during the cleanup pass
+  max-issues-per-linter: 0
+  max-same-issues: 0

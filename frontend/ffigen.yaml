@@ -1,0 +1,6 @@
+name: BackendBindings
+description: FFI bindings for the Go backend.
+output: 'lib/bridge/ffi_bindings.dart'
+headers:
+  entry-points:
+    - '../backend/bridge/bridge.gen.h'

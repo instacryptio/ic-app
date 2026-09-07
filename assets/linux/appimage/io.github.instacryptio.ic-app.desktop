@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Instacrypt
+Comment=A Flugo application
+Exec=ic_app
+Icon=io.github.instacryptio.ic-app
+Terminal=false
+Categories=Utility;

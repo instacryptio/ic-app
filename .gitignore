@@ -1,0 +1,40 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# Flutter / Dart
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+
+# Build output
+build/
+frontend/build/
+
+# Compiled backend binary/shared lib (build artifacts, never committed)
+backend/backend
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ==== flugo-managed (auto-updated by `flugo update`; do not edit inside) ====
+backend/bridge.gen.go
+backend/bridge/bridge.gen.h
+frontend/lib/bridge/bridge.gen.dart
+# ==== end flugo-managed ====

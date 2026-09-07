@@ -1,0 +1,40 @@
+flugo_version: 0.1.4
+app:
+    id: io.github.instacryptio.ic-app
+    name: Instacrypt
+    version: 0.1.0
+    description: A Flugo application
+    author: ""
+    license: ""
+    url: ""
+    url_scheme: instacrypt
+    window:
+        width: 480
+        height: 720
+        min_width: 360
+        min_height: 480
+        titlebar_style: clean
+backend:
+    module: github.com/instacryptio/ic-app
+    services:
+        - service.go
+platforms:
+    linux:
+        flatpak:
+            runtime: org.freedesktop.Platform
+            runtime_version: "24.08"
+            sdk: org.freedesktop.Sdk
+            permissions: []
+    macos:
+        bundle_id: io.github.instacryptio.ic-app
+        minimum_version: "13.0"
+        sandbox: false
+    windows:
+        publisher: ""
+    android:
+        min_sdk: 24
+        target_sdk: 35
+    ios:
+        minimum_version: "16.0"
+icons:
+    source: assets/icons/icon.svg

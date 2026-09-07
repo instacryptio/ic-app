@@ -1,0 +1,47 @@
+# Dart static analysis config. Mirrors the .golangci.yml philosophy on the
+# Go side: correctness-first, not style nitpicks. Real bugs only — no rules
+# that exist purely to enforce a particular formatting opinion.
+
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  language:
+    # Reject implicit downcasts from `dynamic` — catches a class of runtime
+    # crashes by surfacing them at analyze time instead.
+    strict-casts: true
+    strict-raw-types: true
+  errors:
+    # Unused imports / unused locals are easy to introduce during refactoring
+    # and provide no value left in the tree. Uplift to errors so they can't
+    # slip into commits.
+    unused_import: error
+    unused_local_variable: error
+
+linter:
+  rules:
+    # --- Correctness extensions on top of flutter_lints ---
+
+    # Bare `print()` is debug residue — production code should route through
+    # a logger or surface the message via UI/bridge. Same principle as
+    # "libraries don't print" on the Go side.
+    avoid_print: true
+
+    # `someAsync()` without await silently fires-and-forgets — almost always
+    # a bug (lost errors, race conditions). Use `unawaited(...)` to mark
+    # intentional fire-and-forget.
+    unawaited_futures: true
+
+    # Stream subscriptions left uncanceled leak memory and keep their
+    # callbacks alive after the widget unmounts.
+    cancel_subscriptions: true
+
+    # StreamController/IOSink/etc. left unclosed leak resources.
+    close_sinks: true
+
+    # Catches `myList<int>.contains("string")` — silent always-false at
+    # runtime, real bug.
+    collection_methods_unrelated_type: true
+
+    # Avoid `dynamic` method calls — they bypass the type system and are
+    # a frequent source of runtime-only failures.
+    avoid_dynamic_calls: true

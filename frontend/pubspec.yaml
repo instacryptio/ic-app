@@ -1,0 +1,46 @@
+name: ic_app
+description: A Flugo application
+publish_to: 'none'
+
+version: 0.1.0
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  code_assets: ^1.0.0
+  ffi: ^2.1.4
+  hooks: ^1.0.0
+  cupertino_icons: ^1.0.8
+  window_manager: ^0.4.3
+  file_picker: ^8.0.0
+  url_launcher: ^6.2.0
+  path_provider: ^2.1.0
+  share_plus: ^10.0.0
+  app_links: ^6.3.0
+  desktop_drop: ^0.5.0
+  super_clipboard: ^0.9.1
+  flutter_zxing: ^2.2.1
+  dropdown_search: ^7.0.0
+  hardware_key:
+    git:
+      url: https://github.com/hkdb/flugo.git
+      ref: v0.1.4
+      path: plugins/hardware_key
+  webauthn:
+    git:
+      url: https://github.com/hkdb/flugo.git
+      ref: v0.1.4
+      path: plugins/webauthn
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.png

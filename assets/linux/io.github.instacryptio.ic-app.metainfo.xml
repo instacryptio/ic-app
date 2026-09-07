@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.instacryptio.ic-app</id>
+  <name>Instacrypt</name>
+  <summary>An PQC encryption assistant with super powers</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <description>
+    <p>A post quantum computing encryption assistant with super powers.</p>
+  </description>
+  <launchable type="desktop-id">io.github.instacryptio.ic-app.desktop</launchable>
+  <provides>
+    <binary>ic_app</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-03-23" />
+  </releases>
+</component>

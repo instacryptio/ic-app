@@ -85,6 +85,7 @@ jobs:
           mkdir -p dist
           # tar.gz is the guaranteed Linux artifact — build + copy it FIRST so an
           # AppImage failure below can't cost us the tarball.
+          flugo generate            # bridge.gen.* are gitignored — regenerate them
           flugo build linux --release
           flugo package linux
           TAR="$(find frontend/build build -name '*.tar.gz' | head -1)"
@@ -149,6 +150,7 @@ jobs:
           export PKG_CONFIG_PATH="$BREW/lib/pkgconfig:$BREW/share/pkgconfig:$SSL/lib/pkgconfig:$YK/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
           export CGO_CFLAGS="-I$BREW/include -I$SSL/include -I$YK/include"
           export CGO_LDFLAGS="-L$BREW/lib -L$SSL/lib -L$YK/lib"
+          flugo generate            # bridge.gen.* are gitignored — regenerate them
           flugo build macos --release
           APP="$(find frontend/build/macos -maxdepth 5 -name '*.app' -type d | head -1)"
           test -n "$APP"
@@ -227,6 +229,7 @@ jobs:
           $env:PATH = "$env:RUNNER_TEMP\msys64\${{ matrix.msystem }}\bin;$env:PATH"
           $env:CC = "${{ matrix.cc }}"
           $env:PATH = "$env:PATH;$(go env GOPATH)\bin"
+          flugo generate            # bridge.gen.* are gitignored — regenerate them
           flugo build windows --release
           $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release | Select-Object -First 1
           if (-not $rel) { throw "windows Release dir not found" }
@@ -301,6 +304,7 @@ jobs:
           # RISK: debug-signed (build.gradle.kts release uses the debug keystore).
           # Release signing = generate a keystore + add ANDROID_KEYSTORE_* secrets
           # + a release signingConfig (fast-follow).
+          flugo generate            # bridge.gen.* are gitignored — regenerate them
           flugo build android --release
           APK="$(find frontend/build -name 'app-release.apk' | head -1)"
           test -n "$APK"

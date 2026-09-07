@@ -28,7 +28,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.2
+  FLUGO_VERSION: v0.1.4
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -54,7 +54,7 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            git curl unzip zip xz-utils file ca-certificates build-essential \
+            git curl unzip zip xz-utils file ca-certificates build-essential jq \
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libsecret-1-dev \
             libykpers-1-dev libfido2-dev \
@@ -178,7 +178,9 @@ jobs:
       matrix:
         include:
           - { arch: amd64, runner: windows-2025,   msystem: MINGW64,     prefix: mingw-w64-x86_64,        cc: gcc }
-          - { arch: arm64, runner: windows-11-arm, msystem: CLANGARM64,  prefix: mingw-w64-clang-aarch64, cc: clang }
+          # NOTE: no windows-arm64 — Flutter ships no Windows-arm64 SDK, so
+          # flutter-action can't resolve one. Windows-on-arm runs the amd64
+          # build under x64 emulation.
     steps:
       - uses: actions/checkout@v5
 
@@ -211,6 +213,8 @@ jobs:
         shell: pwsh
         run: |
           $ver = "$env:TAG".TrimStart('v')
+          # pub/flugo require semver X.Y.Z; a non-semver tag (test build) → 0.0.0.
+          if ($ver -notmatch '^\d+\.\d+\.\d+') { Write-Host "note: tag '$ver' not semver -> app version 0.0.0"; $ver = '0.0.0' }
           # Single-quote the '${1}' backref so it reaches the regex engine literally.
           (Get-Content flugo.yaml) -replace '^(\s+)version:.*', ('${1}version: ' + $ver) | Set-Content flugo.yaml
           (Get-Content frontend/pubspec.yaml) -replace '^version:.*', ("version: $ver+" + $env:GITHUB_RUN_NUMBER) | Set-Content frontend/pubspec.yaml

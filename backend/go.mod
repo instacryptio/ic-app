@@ -32,3 +32,11 @@ require (
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 )
+
+// go-libfido2's upstream Windows build links a STALE libfido2 VENDORED in the
+// module (missing the touch API newer code calls). Our fork of the exact pinned
+// commit (keys-pub master bf2d0535) switches Windows to system libfido2 via
+// pkg-config and drops the vendored dir; darwin/linux + the API are untouched.
+// Replaces don't propagate from icfx (main-module only), so it lives here;
+// ic-cli needs the same at its next release.
+replace github.com/keys-pub/go-libfido2 => github.com/instacryptio/go-libfido2 v1.5.4-instacrypt.1

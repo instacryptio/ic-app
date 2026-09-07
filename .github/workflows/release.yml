@@ -28,7 +28,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.4
+  FLUGO_VERSION: v0.1.5
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -49,6 +49,12 @@ jobs:
     env:
       # appimagetool can't mount FUSE inside a container — run it extracted.
       APPIMAGE_EXTRACT_AND_RUN: "1"
+      # Pin one stable tag for BOTH Linux arches: amd64 pulls the prebuilt SDK,
+      # arm64 clones it (Flutter builds arm64 engine artifacts but doesn't
+      # package them into releases_linux.json, so the action can't resolve
+      # `stable` on arm64). A branch tip can drift off its tagged commit and
+      # break flutter's `--depth 1` version detection — pin, bump deliberately.
+      FLUTTER_VERSION: "3.47.2"
     steps:
       - name: Install toolchain (container is bare)
         run: |
@@ -68,10 +74,29 @@ jobs:
           go-version-file: backend/go.mod
           cache: true
 
-      - uses: subosito/flutter-action@v2
+      # amd64 has a prebuilt SDK archive the action resolves; arm64 does NOT
+      # (Flutter builds arm64 engine artifacts but doesn't package them into
+      # releases_linux.json), so the action errors "Unable to determine Flutter
+      # version ... arm64". Clone the SDK for arm64 — precache pulls the real
+      # arm64 desktop engine, which does exist. safe.directory '*' is already set
+      # in the toolchain step (root in a container), so flutter's git version
+      # probe won't abort under --depth 1.
+      - name: Set up Flutter (amd64, prebuilt SDK)
+        if: matrix.arch == 'amd64'
+        uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+
+      - name: Set up Flutter (arm64, git clone)
+        if: matrix.arch == 'arm64'
+        run: |
+          git clone --depth 1 -b "${FLUTTER_VERSION}" \
+            https://github.com/flutter/flutter.git "${RUNNER_TEMP}/flutter"
+          echo "${RUNNER_TEMP}/flutter/bin" >> "$GITHUB_PATH"
+          # $GITHUB_PATH only affects LATER steps, so call flutter by full path here.
+          "${RUNNER_TEMP}/flutter/bin/flutter" --version   # bootstrap + confirm the tag
+          "${RUNNER_TEMP}/flutter/bin/flutter" precache --linux   # pull arm64 desktop engine
 
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}
@@ -229,8 +254,13 @@ jobs:
           $env:PATH = "$env:RUNNER_TEMP\msys64\${{ matrix.msystem }}\bin;$env:PATH"
           $env:CC = "${{ matrix.cc }}"
           $env:PATH = "$env:PATH;$(go env GOPATH)\bin"
+          # pwsh does NOT halt on a native command's nonzero exit — check
+          # $LASTEXITCODE so a build failure stops here instead of cascading into
+          # a confusing "Release dir not found" further down.
           flugo generate            # bridge.gen.* are gitignored — regenerate them
+          if ($LASTEXITCODE -ne 0) { throw "flugo generate failed ($LASTEXITCODE)" }
           flugo build windows --release
+          if ($LASTEXITCODE -ne 0) { throw "flugo build windows failed ($LASTEXITCODE)" }
           $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release | Select-Object -First 1
           if (-not $rel) { throw "windows Release dir not found" }
           # RISK: Flutter Windows output is a folder; build a single installer .exe

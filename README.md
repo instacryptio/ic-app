@@ -3,7 +3,7 @@
 
 ### 👁️‍🗨️ Summary
 
-A GUI desktop and mobile application for Instacrypt -- A friendlier post-quantum ready encryption assistant.
+A GUI desktop and mobile application for [Instacrypt](https://instacrypt.io) powered by the [icfx](https://github.com/instacryptio/icfx/) cryptographic library -- A friendlier post-quantum ready encryption assistant.
 
 
 ### 🪶 Features

@@ -28,7 +28,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.5
+  FLUGO_VERSION: v0.1.6
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -261,8 +261,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "flugo generate failed ($LASTEXITCODE)" }
           flugo build windows --release
           if ($LASTEXITCODE -ne 0) { throw "flugo build windows failed ($LASTEXITCODE)" }
-          $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release | Select-Object -First 1
-          if (-not $rel) { throw "windows Release dir not found" }
+          # -Filter Release also matches CMake intermediates (…\ALL_BUILD.dir\Release);
+          # the actual app output is …\<arch>\runner\Release — select that one.
+          $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release |
+                 Where-Object { $_.FullName -match 'runner\\Release$' } | Select-Object -First 1
+          if (-not $rel) { throw "windows runner\Release dir not found" }
           # RISK: Flutter Windows output is a folder; build a single installer .exe
           # via Inno Setup. Unsigned (SmartScreen will warn).
           choco install innosetup --no-progress -y

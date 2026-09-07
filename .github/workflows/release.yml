@@ -28,7 +28,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.6
+  FLUGO_VERSION: v0.1.7
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------

@@ -1,4 +1,7 @@
-# 🚀 Instacrypt App
+# Instacrypt App
+
+
+### 👁️‍🗨️ Summary
 
 A GUI desktop and mobile application for Instacrypt -- A friendlier post-quantum ready encryption assistant.
 

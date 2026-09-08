@@ -19,8 +19,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag/release to build and attach artifacts to
-        required: true
+        description: 'Label for asset filenames + version stamp. Any string works for a test build — no real tag/release needed (publish only runs on an actual Release).'
+        required: false
+        default: dev
+      platforms:
+        description: 'OS builds to run — comma-separated (linux,macos,windows,android) or "all". Ignored on a real Release (always builds everything).'
+        required: false
+        default: all
 
 permissions:
   contents: write
@@ -36,6 +41,7 @@ jobs:
   # runner, so the .tar.gz + .AppImage run on older distros (AppImageHub-friendly)
   # without pinning the deprecating `ubuntu-22.04` runner label.
   build-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'linux') }}
     name: build Linux-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     container:
@@ -133,6 +139,7 @@ jobs:
 
   # --- macOS amd64 (Intel) + arm64 (Apple Silicon) ---------------------------
   build-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'macos') }}
     name: build macOS-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -198,6 +205,7 @@ jobs:
   # windows`. This runs in pwsh with the MSYS2 bin on PATH and CC set for cgo;
   # expect to iterate here.
   build-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'windows') }}
     name: build windows-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -298,6 +306,7 @@ jobs:
   # (jniLibs/<abi>/libbackend.so) then `flutter build apk`. chalresp/fido2 are
   # pure-Go stubs on android, so no ykpers/libfido2 — NDK is the only native need.
   build-android:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'android') }}
     name: build android
     runs-on: ubuntu-24.04
     steps:
@@ -356,6 +365,9 @@ jobs:
   # skips publish, leaving no partial release.
   publish:
     name: Upload assets + checksums
+    # Real Releases only — a manual workflow_dispatch is a build/test run, so it
+    # never uploads (the built binaries are still available as run artifacts).
+    if: ${{ github.event_name == 'release' }}
     needs: [build-linux, build-macos, build-windows, build-android]
     runs-on: ubuntu-24.04
     steps:

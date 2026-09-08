@@ -39,4 +39,4 @@ require (
 // pkg-config and drops the vendored dir; darwin/linux + the API are untouched.
 // Replaces don't propagate from icfx (main-module only), so it lives here;
 // ic-cli needs the same at its next release.
-replace github.com/keys-pub/go-libfido2 => github.com/instacryptio/go-libfido2 v1.5.4-instacrypt.1
+replace github.com/keys-pub/go-libfido2 => github.com/instacryptio/go-libfido2 v1.5.4-instacrypt.2

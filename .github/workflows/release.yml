@@ -258,6 +258,7 @@ jobs:
             ${{ matrix.prefix }}-pkgconf
             ${{ matrix.prefix }}-yubikey-personalization
             ${{ matrix.prefix }}-libfido2
+            ${{ matrix.prefix }}-ntldd-git
 
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@$env:FLUGO_VERSION
@@ -292,6 +293,18 @@ jobs:
           $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release |
                  Where-Object { $_.FullName -match 'runner\\Release$' } | Select-Object -First 1
           if (-not $rel) { throw "windows runner\Release dir not found" }
+          # backend.dll is a MinGW cgo build; its dependency chain (libfido2, ykpers,
+          # openssl/libcrypto, cbor + the MinGW runtime libgcc_s/libwinpthread) is NOT
+          # on a stock Windows box and Flutter doesn't bundle it — so the app's FFI
+          # load of backend.dll fails and it launches to nothing. Copy backend.dll's
+          # mingw64 deps next to it (ntldd -R = full recursive set); the installer's
+          # Source line then packages them.
+          $mingwBin = "$env:RUNNER_TEMP\msys64\${{ matrix.msystem }}\bin"
+          $deps = & "$mingwBin\ntldd.exe" -R "$($rel.FullName)\backend.dll" |
+                  ForEach-Object { if ($_ -match '=>\s+(\S+\.dll)') { $matches[1] } } |
+                  Where-Object { $_ -match 'mingw64' } | Sort-Object -Unique
+          if (-not $deps) { throw "ntldd resolved no mingw deps for backend.dll" }
+          foreach ($d in $deps) { Copy-Item $d "$($rel.FullName)\" -Force; Write-Host "bundled $(Split-Path $d -Leaf)" }
           # RISK: Flutter Windows output is a folder; build a single installer .exe
           # via Inno Setup. Unsigned (SmartScreen will warn).
           choco install innosetup --no-progress -y

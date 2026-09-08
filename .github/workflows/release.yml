@@ -19,8 +19,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing tag/release to build and attach artifacts to
-        required: true
+        description: 'Label for asset filenames + version stamp. Any string works for a test build — no real tag/release needed (publish only runs on an actual Release).'
+        required: false
+        default: dev
+      platforms:
+        description: 'OS builds to run — comma-separated (linux,macos,windows,android) or "all". Ignored on a real Release (always builds everything).'
+        required: false
+        default: all
 
 permissions:
   contents: write
@@ -28,7 +33,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.2
+  FLUGO_VERSION: v0.1.7
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -36,6 +41,7 @@ jobs:
   # runner, so the .tar.gz + .AppImage run on older distros (AppImageHub-friendly)
   # without pinning the deprecating `ubuntu-22.04` runner label.
   build-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'linux') }}
     name: build Linux-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     container:
@@ -49,12 +55,18 @@ jobs:
     env:
       # appimagetool can't mount FUSE inside a container — run it extracted.
       APPIMAGE_EXTRACT_AND_RUN: "1"
+      # Pin one stable tag for BOTH Linux arches: amd64 pulls the prebuilt SDK,
+      # arm64 clones it (Flutter builds arm64 engine artifacts but doesn't
+      # package them into releases_linux.json, so the action can't resolve
+      # `stable` on arm64). A branch tip can drift off its tagged commit and
+      # break flutter's `--depth 1` version detection — pin, bump deliberately.
+      FLUTTER_VERSION: "3.47.2"
     steps:
       - name: Install toolchain (container is bare)
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            git curl unzip zip xz-utils file ca-certificates build-essential \
+            git curl unzip zip xz-utils file ca-certificates build-essential jq \
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libsecret-1-dev \
             libykpers-1-dev libfido2-dev \
@@ -68,10 +80,29 @@ jobs:
           go-version-file: backend/go.mod
           cache: true
 
-      - uses: subosito/flutter-action@v2
+      # amd64 has a prebuilt SDK archive the action resolves; arm64 does NOT
+      # (Flutter builds arm64 engine artifacts but doesn't package them into
+      # releases_linux.json), so the action errors "Unable to determine Flutter
+      # version ... arm64". Clone the SDK for arm64 — precache pulls the real
+      # arm64 desktop engine, which does exist. safe.directory '*' is already set
+      # in the toolchain step (root in a container), so flutter's git version
+      # probe won't abort under --depth 1.
+      - name: Set up Flutter (amd64, prebuilt SDK)
+        if: matrix.arch == 'amd64'
+        uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
+
+      - name: Set up Flutter (arm64, git clone)
+        if: matrix.arch == 'arm64'
+        run: |
+          git clone --depth 1 -b "${FLUTTER_VERSION}" \
+            https://github.com/flutter/flutter.git "${RUNNER_TEMP}/flutter"
+          echo "${RUNNER_TEMP}/flutter/bin" >> "$GITHUB_PATH"
+          # $GITHUB_PATH only affects LATER steps, so call flutter by full path here.
+          "${RUNNER_TEMP}/flutter/bin/flutter" --version   # bootstrap + confirm the tag
+          "${RUNNER_TEMP}/flutter/bin/flutter" precache --linux   # pull arm64 desktop engine
 
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}
@@ -85,6 +116,7 @@ jobs:
           mkdir -p dist
           # tar.gz is the guaranteed Linux artifact — build + copy it FIRST so an
           # AppImage failure below can't cost us the tarball.
+          flugo generate            # bridge.gen.* are gitignored — regenerate them
           flugo build linux --release
           flugo package linux
           TAR="$(find frontend/build build -name '*.tar.gz' | head -1)"
@@ -107,6 +139,7 @@ jobs:
 
   # --- macOS amd64 (Intel) + arm64 (Apple Silicon) ---------------------------
   build-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'macos') }}
     name: build macOS-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -149,6 +182,7 @@ jobs:
           export PKG_CONFIG_PATH="$BREW/lib/pkgconfig:$BREW/share/pkgconfig:$SSL/lib/pkgconfig:$YK/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
           export CGO_CFLAGS="-I$BREW/include -I$SSL/include -I$YK/include"
           export CGO_LDFLAGS="-L$BREW/lib -L$SSL/lib -L$YK/lib"
+          flugo generate            # bridge.gen.* are gitignored — regenerate them
           flugo build macos --release
           APP="$(find frontend/build/macos -maxdepth 5 -name '*.app' -type d | head -1)"
           test -n "$APP"
@@ -171,6 +205,7 @@ jobs:
   # windows`. This runs in pwsh with the MSYS2 bin on PATH and CC set for cgo;
   # expect to iterate here.
   build-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'windows') }}
     name: build windows-${{ matrix.arch }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -178,7 +213,9 @@ jobs:
       matrix:
         include:
           - { arch: amd64, runner: windows-2025,   msystem: MINGW64,     prefix: mingw-w64-x86_64,        cc: gcc }
-          - { arch: arm64, runner: windows-11-arm, msystem: CLANGARM64,  prefix: mingw-w64-clang-aarch64, cc: clang }
+          # NOTE: no windows-arm64 — Flutter ships no Windows-arm64 SDK, so
+          # flutter-action can't resolve one. Windows-on-arm runs the amd64
+          # build under x64 emulation.
     steps:
       - uses: actions/checkout@v5
 
@@ -211,6 +248,8 @@ jobs:
         shell: pwsh
         run: |
           $ver = "$env:TAG".TrimStart('v')
+          # pub/flugo require semver X.Y.Z; a non-semver tag (test build) → 0.0.0.
+          if ($ver -notmatch '^\d+\.\d+\.\d+') { Write-Host "note: tag '$ver' not semver -> app version 0.0.0"; $ver = '0.0.0' }
           # Single-quote the '${1}' backref so it reaches the regex engine literally.
           (Get-Content flugo.yaml) -replace '^(\s+)version:.*', ('${1}version: ' + $ver) | Set-Content flugo.yaml
           (Get-Content frontend/pubspec.yaml) -replace '^version:.*', ("version: $ver+" + $env:GITHUB_RUN_NUMBER) | Set-Content frontend/pubspec.yaml
@@ -223,9 +262,18 @@ jobs:
           $env:PATH = "$env:RUNNER_TEMP\msys64\${{ matrix.msystem }}\bin;$env:PATH"
           $env:CC = "${{ matrix.cc }}"
           $env:PATH = "$env:PATH;$(go env GOPATH)\bin"
+          # pwsh does NOT halt on a native command's nonzero exit — check
+          # $LASTEXITCODE so a build failure stops here instead of cascading into
+          # a confusing "Release dir not found" further down.
+          flugo generate            # bridge.gen.* are gitignored — regenerate them
+          if ($LASTEXITCODE -ne 0) { throw "flugo generate failed ($LASTEXITCODE)" }
           flugo build windows --release
-          $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release | Select-Object -First 1
-          if (-not $rel) { throw "windows Release dir not found" }
+          if ($LASTEXITCODE -ne 0) { throw "flugo build windows failed ($LASTEXITCODE)" }
+          # -Filter Release also matches CMake intermediates (…\ALL_BUILD.dir\Release);
+          # the actual app output is …\<arch>\runner\Release — select that one.
+          $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release |
+                 Where-Object { $_.FullName -match 'runner\\Release$' } | Select-Object -First 1
+          if (-not $rel) { throw "windows runner\Release dir not found" }
           # RISK: Flutter Windows output is a folder; build a single installer .exe
           # via Inno Setup. Unsigned (SmartScreen will warn).
           choco install innosetup --no-progress -y
@@ -258,6 +306,7 @@ jobs:
   # (jniLibs/<abi>/libbackend.so) then `flutter build apk`. chalresp/fido2 are
   # pure-Go stubs on android, so no ykpers/libfido2 — NDK is the only native need.
   build-android:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'android') }}
     name: build android
     runs-on: ubuntu-24.04
     steps:
@@ -297,6 +346,7 @@ jobs:
           # RISK: debug-signed (build.gradle.kts release uses the debug keystore).
           # Release signing = generate a keystore + add ANDROID_KEYSTORE_* secrets
           # + a release signingConfig (fast-follow).
+          flugo generate            # bridge.gen.* are gitignored — regenerate them
           flugo build android --release
           APK="$(find frontend/build -name 'app-release.apk' | head -1)"
           test -n "$APK"
@@ -315,6 +365,9 @@ jobs:
   # skips publish, leaving no partial release.
   publish:
     name: Upload assets + checksums
+    # Real Releases only — a manual workflow_dispatch is a build/test run, so it
+    # never uploads (the built binaries are still available as run artifacts).
+    if: ${{ github.event_name == 'release' }}
     needs: [build-linux, build-macos, build-windows, build-android]
     runs-on: ubuntu-24.04
     steps:

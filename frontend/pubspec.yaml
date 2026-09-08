@@ -27,12 +27,12 @@ dependencies:
   hardware_key:
     git:
       url: https://github.com/hkdb/flugo.git
-      ref: v0.1.4
+      ref: v0.1.8
       path: plugins/hardware_key
   webauthn:
     git:
       url: https://github.com/hkdb/flugo.git
-      ref: v0.1.4
+      ref: v0.1.8
       path: plugins/webauthn
 
 dev_dependencies:

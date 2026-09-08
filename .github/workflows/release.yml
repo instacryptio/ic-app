@@ -33,7 +33,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.7
+  FLUGO_VERSION: v0.1.8
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -201,7 +201,13 @@ jobs:
           mkdir -p dist
           # RISK: unsigned/un-notarized — Gatekeeper will warn (document
           # `xattr -dr com.apple.quarantine`). Real signing needs an Apple account.
-          hdiutil create -volname "Instacrypt" -srcfolder "$APP" -ov -format UDZO \
+          # Stage the .app beside an /Applications symlink so the .dmg opens with
+          # the familiar "drag Instacrypt → Applications" install layout.
+          STAGE="$(mktemp -d)/Instacrypt"
+          mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Instacrypt" -srcfolder "$STAGE" -ov -format UDZO \
             "dist/Instacrypt-App-macOS-${{ matrix.arch }}-${TAG}.dmg"
 
       - uses: actions/upload-artifact@v6
@@ -299,6 +305,8 @@ jobs:
           OutputDir=dist
           OutputBaseFilename=Instacrypt-App-windows-${{ matrix.arch }}-$env:TAG
           ArchitecturesInstallIn64BitMode=x64compatible arm64
+          SetupIconFile=frontend\windows\runner\resources\app_icon.ico
+          UninstallDisplayIcon={app}\ic_app.exe
           [Files]
           Source: "$($rel.FullName)\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
           [Icons]

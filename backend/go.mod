@@ -5,7 +5,7 @@ go 1.26.6
 require (
 	github.com/awnumar/memguard v0.23.0
 	github.com/hkdb/flugo v0.1.9
-	github.com/instacryptio/icfx v0.1.3
+	github.com/instacryptio/icfx v0.1.5
 )
 
 require (
@@ -17,6 +17,7 @@ require (
 	github.com/awnumar/memcall v0.4.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/danieljoos/wincred v1.2.2 // indirect
+	github.com/ebfe/scard v0.0.0-20241214075232-7af069cabc25 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -25,6 +26,7 @@ require (
 	github.com/makiuchi-d/gozxing v0.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
+	github.com/sstallion/go-hid v0.15.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/zalando/go-keyring v0.2.6 // indirect
 	golang.org/x/crypto v0.50.0 // indirect

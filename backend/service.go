@@ -309,7 +309,7 @@ func (e *hwRequiredError) Error() string {
 
 // openDesktopHWChalresp returns the cached *chalresp.Key for desktop
 // setup paths (toggleHWKeyOn/Off, CreateKeys with useHWKey, ImportIdentity
-// with preserveHW, profileHWRestoreFactory) that need libykpers-specific
+// with preserveHW, profileHWRestoreFactory) that need go-hid-specific
 // APIs like IsSlot2Programmed / Descriptor. On mobile, returns a clear
 // error — setup of HW-protected identities requires desktop today.
 func openDesktopHWChalresp() (*chalresp.Key, error) {
@@ -583,7 +583,7 @@ func (s *IcfxService) RequiresHardwareKey() (bool, error) {
 
 // HasAnyHardwareKey reports whether at least one compatible hardware key is
 // currently plugged in. Backed by chalresp.List(); does not issue any
-// challenge or trigger a touch. Returns false (without error) if the libykpers
+// challenge or trigger a touch. Returns false (without error) if the go-hid
 // init itself fails — treating "init unavailable" the same as "no key
 // detected" is the most useful UX from the Dart side.
 //
@@ -595,7 +595,7 @@ func (s *IcfxService) HasAnyHardwareKey() (bool, error) { //nolint:unparam // br
 	if err != nil {
 		// Intentional: treat enumeration failure as "no device" so the
 		// Dart UI can show a clean "plug in your key" prompt instead of
-		// a raw libykpers error.
+		// a raw go-hid error.
 		return false, nil //nolint:nilerr
 	}
 	return len(devices) > 0, nil

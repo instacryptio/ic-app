@@ -428,7 +428,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final useHWKey = details['useHWKey'] == 'true';
 
     // HW pre-flight before any keystore writes. Desktop: presence loop
-    // (libykpers needs the device for slot-2 check + smoke test inside
+    // (go-hid needs the device for slot-2 check + smoke test inside
     // CreateKeys). Mobile: full NFC dance — generate challenge, tap,
     // inject response — so CreateKeys can persist the challenge file
     // and derive the KEK from the pre-fetched response.

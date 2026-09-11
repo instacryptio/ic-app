@@ -9,6 +9,15 @@ set -euo pipefail
 
 VER="${1:?usage: stamp-version.sh <version>}"
 BUILD="${GITHUB_RUN_NUMBER:-1}"
+
+# pub + flugo require a semver X.Y.Z app version. A non-semver tag (e.g. a test
+# build tag like "test-build") falls back to 0.0.0 so the build doesn't choke;
+# artifacts still use the raw tag for their filenames.
+if ! [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+  echo "note: tag '$VER' is not semver — stamping app version 0.0.0"
+  VER="0.0.0"
+fi
+
 export VER BUILD
 
 # flugo.yaml: app.version is the only indented `version:` key (flugo_version,

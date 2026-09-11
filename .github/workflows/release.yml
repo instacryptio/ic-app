@@ -36,7 +36,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.9
+  FLUGO_VERSION: v0.1.10
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -209,6 +209,14 @@ jobs:
           flugo build macos --release
           APP="$(find frontend/build/macos -maxdepth 5 -name '*.app' -type d | head -1)"
           test -n "$APP"
+          # Guard against shipping a hollow bundle (flugo used to fabricate an
+          # empty <projectdir>.app holding only the Go dylib). A real bundle has
+          # the Runner binary AND the injected backend dylib.
+          test -d "$APP/Contents/MacOS" && [ -n "$(ls -A "$APP/Contents/MacOS")" ] \
+            || { echo "::error::built .app is missing Contents/MacOS (hollow bundle): $APP"; exit 1; }
+          test -f "$APP/Contents/Frameworks/libbackend.dylib" \
+            || { echo "::error::built .app is missing Contents/Frameworks/libbackend.dylib: $APP"; exit 1; }
+          echo "Packaging bundle: $(basename "$APP")"
           mkdir -p dist
           # RISK: unsigned/un-notarized — Gatekeeper will warn (document
           # `xattr -dr com.apple.quarantine`). Real signing needs an Apple account.
@@ -330,11 +338,11 @@ jobs:
           OutputBaseFilename=Instacrypt-App-windows-${{ matrix.arch }}-$env:TAG
           ArchitecturesInstallIn64BitMode=x64compatible arm64
           SetupIconFile=frontend\windows\runner\resources\app_icon.ico
-          UninstallDisplayIcon={app}\ic_app.exe
+          UninstallDisplayIcon={app}\Instacrypt.exe
           [Files]
           Source: "$($rel.FullName)\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
           [Icons]
-          Name: "{group}\Instacrypt"; Filename: "{app}\ic_app.exe"
+          Name: "{group}\Instacrypt"; Filename: "{app}\Instacrypt.exe"
           "@
           $iss | Set-Content build-installer.iss
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" build-installer.iss

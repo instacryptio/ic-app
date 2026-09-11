@@ -29,7 +29,7 @@ Future<bool> ensureSessionUnlocked(
   // organically on the next crypto op (via openIdentity in encrypt/decrypt)
   // and at launch (via _verifyDefaultHWAtLaunch).
   if (await icfxService.requiresHardwareKey()) {
-    // Desktop only: poll for a USB-plugged-in device via libykpers
+    // Desktop only: poll for a USB-plugged-in device via go-hid
     // before asking for a passphrase. On mobile, `hasAnyHardwareKey`
     // is chalresp-backed and always returns false (chalresp is
     // stubbed on android/ios). Both NFC and USB-OTG transports are

@@ -2,9 +2,12 @@ name: Release
 
 # Build the Instacrypt desktop + Android apps and attach them to a published
 # GitHub Release. Everything is built through the `flugo` CLI (Flutter UI + Go
-# FFI backend). The desktop backend is a cgo c-shared lib that links YubiKey
-# (libykpers-1) + FIDO2 (libfido2) hardware-key support, so every desktop/Android
-# runner installs those native deps — same posture as ic-cli's release.yml.
+# FFI backend). The desktop backend is a cgo c-shared lib with hardware-key
+# support: challenge-response over HID via go-hid (vendors the hidapi C source —
+# needs only libudev on Linux; IOKit/CoreFoundation frameworks on macOS; nothing
+# at link time on Windows), FIDO2 via libfido2, and PC/SC (Nitrokey 3) via
+# ebfe/scard enabled with GOFLAGS=-tags=pcsc. Android is GOOS-stubbed (pure-Go, no
+# hardware libs). Same posture as ic-cli's release.yml.
 #
 # NOTE (first-cut / needs CI iteration): this workflow cannot be validated
 # locally (no Flutter/macOS/Windows here). The highest-risk spots are marked
@@ -33,7 +36,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.8
+  FLUGO_VERSION: v0.1.9
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -69,7 +72,7 @@ jobs:
             git curl unzip zip xz-utils file ca-certificates build-essential jq \
             clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libsecret-1-dev \
-            libykpers-1-dev libfido2-dev \
+            libudev-dev libfido2-dev libpcsclite-dev \
             libfuse2 desktop-file-utils librsvg2-bin imagemagick
           git config --global --add safe.directory '*'
 
@@ -111,6 +114,8 @@ jobs:
         run: bash .github/scripts/stamp-version.sh "${TAG#v}"
 
       - name: Build + package
+        env:
+          GOFLAGS: -tags=pcsc          # flugo's inner `go build` inherits this → enables the PC/SC (Nitrokey 3) backend
         run: |
           export PATH="$PATH:$(go env GOPATH)/bin"
           mkdir -p dist
@@ -164,7 +169,10 @@ jobs:
       - name: Install native deps
         run: |
           brew untap aws/tap 2>/dev/null || true   # keep a security product's logs clean
-          brew install pkg-config ykpers libfido2 openssl@3
+          # ykpers is gone (chalresp is go-hid now, using the native IOHIDManager backend
+          # on macOS — IOKit/CoreFoundation, no third-party lib). scard's PC/SC framework
+          # is system-provided. Only libfido2 + openssl@3 need Homebrew.
+          brew install pkg-config libfido2 openssl@3
 
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}
@@ -173,15 +181,18 @@ jobs:
         run: bash .github/scripts/stamp-version.sh "${TAG#v}"
 
       - name: Build + package (.dmg)
+        env:
+          GOFLAGS: -tags=pcsc          # enables PC/SC (Nitrokey 3) in flugo's inner `go build`
         run: |
           export PATH="$PATH:$(go env GOPATH)/bin"
           # Homebrew include/lib + keg-only openssl@3 aren't on the default search
           # path; point cgo at them so libfido2 doesn't hit go-libfido2's static
-          # openssl@1.1 path (mirrors ic-cli).
-          BREW="$(brew --prefix)"; SSL="$(brew --prefix openssl@3)"; YK="$(brew --prefix ykpers)"
-          export PKG_CONFIG_PATH="$BREW/lib/pkgconfig:$BREW/share/pkgconfig:$SSL/lib/pkgconfig:$YK/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-          export CGO_CFLAGS="-I$BREW/include -I$SSL/include -I$YK/include"
-          export CGO_LDFLAGS="-L$BREW/lib -L$SSL/lib -L$YK/lib"
+          # openssl@1.1 path (mirrors ic-cli). go-hid (IOKit/CoreFoundation) and scard
+          # (-framework PCSC) declare their own cgo — no extra paths needed for them.
+          BREW="$(brew --prefix)"; SSL="$(brew --prefix openssl@3)"
+          export PKG_CONFIG_PATH="$BREW/lib/pkgconfig:$BREW/share/pkgconfig:$SSL/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+          export CGO_CFLAGS="-I$BREW/include -I$SSL/include"
+          export CGO_LDFLAGS="-L$BREW/lib -L$SSL/lib"
           # Force single-arch per runner. `flutter build macos` defaults to a
           # UNIVERSAL (x86_64+arm64) build, but the non-native slice can't link
           # the single-arch Homebrew cgo libs — an x86_64 slice on an Apple
@@ -218,10 +229,11 @@ jobs:
 
   # --- Windows amd64 (MINGW64) + arm64 (CLANGARM64) --------------------------
   # RISK (highest): the Go backend.dll is a cgo build needing mingw gcc/clang +
-  # ykpers/libfido2 (from MSYS2), while `flutter build windows` needs MSVC (from
-  # the runner's Visual Studio). Both toolchains must be visible to `flugo build
-  # windows`. This runs in pwsh with the MSYS2 bin on PATH and CC set for cgo;
-  # expect to iterate here.
+  # libfido2 (from MSYS2), while `flutter build windows` needs MSVC (from the
+  # runner's Visual Studio). Both toolchains must be visible to `flugo build
+  # windows`. go-hid links nothing at build time (runtime LoadLibrary of hid.dll)
+  # and scard/pcsc is pure-Go (winscard.dll). This runs in pwsh with the MSYS2 bin
+  # on PATH and CC set for cgo; expect to iterate here.
   build-windows:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || contains(inputs.platforms, 'windows') }}
     name: build windows-${{ matrix.arch }}
@@ -256,25 +268,24 @@ jobs:
           install: >-
             ${{ matrix.prefix }}-${{ matrix.cc }}
             ${{ matrix.prefix }}-pkgconf
-            ${{ matrix.prefix }}-yubikey-personalization
             ${{ matrix.prefix }}-libfido2
             ${{ matrix.prefix }}-ntldd-git
+            perl
 
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@$env:FLUGO_VERSION
 
-      - name: Stamp version (PowerShell)
-        shell: pwsh
-        run: |
-          $ver = "$env:TAG".TrimStart('v')
-          # pub/flugo require semver X.Y.Z; a non-semver tag (test build) → 0.0.0.
-          if ($ver -notmatch '^\d+\.\d+\.\d+') { Write-Host "note: tag '$ver' not semver -> app version 0.0.0"; $ver = '0.0.0' }
-          # Single-quote the '${1}' backref so it reaches the regex engine literally.
-          (Get-Content flugo.yaml) -replace '^(\s+)version:.*', ('${1}version: ' + $ver) | Set-Content flugo.yaml
-          (Get-Content frontend/pubspec.yaml) -replace '^version:.*', ("version: $ver+" + $env:GITHUB_RUN_NUMBER) | Set-Content frontend/pubspec.yaml
+      # Run the SAME stamp script as Linux/macOS/Android (via the msys2 bash + perl),
+      # instead of a parallel PowerShell reimplementation, so the version logic can't
+      # drift across platforms.
+      - name: Stamp version
+        shell: msys2 {0}
+        run: bash .github/scripts/stamp-version.sh "${TAG#v}"
 
       - name: Build + installer (.exe)
         shell: pwsh
+        env:
+          GOFLAGS: -tags=pcsc          # enables PC/SC (Nitrokey 3) in flugo's inner `go build` (scard is pure-Go winscard)
         run: |
           # Put the MSYS2 mingw bin on PATH so cgo finds gcc/clang + the HW libs,
           # while flutter still sees MSVC from Visual Studio on the runner.
@@ -293,7 +304,7 @@ jobs:
           $rel = Get-ChildItem -Recurse -Directory frontend/build/windows -Filter Release |
                  Where-Object { $_.FullName -match 'runner\\Release$' } | Select-Object -First 1
           if (-not $rel) { throw "windows runner\Release dir not found" }
-          # backend.dll is a MinGW cgo build; its dependency chain (libfido2, ykpers,
+          # backend.dll is a MinGW cgo build; its dependency chain (libfido2,
           # openssl/libcrypto, cbor + the MinGW runtime libgcc_s/libwinpthread) is NOT
           # on a stock Windows box and Flutter doesn't bundle it — so the app's FFI
           # load of backend.dll fails and it launches to nothing. Copy backend.dll's
@@ -373,18 +384,56 @@ jobs:
       - name: Stamp version
         run: bash .github/scripts/stamp-version.sh "${TAG#v}"
 
-      - name: Build APK
+      # Release signing: decode the keystore secret and write key.properties, which
+      # build.gradle.kts reads (falling back to the debug keystore when absent). Only
+      # on real releases (published releases + pre-releases) — a secret-less
+      # workflow_dispatch build stays debug-signed so dev/test runs still work.
+      - name: Set up Android release signing
+        if: github.event_name == 'release'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          set -eo pipefail
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::release build but ANDROID_KEYSTORE_BASE64 secret is unset — refusing to ship a debug-signed release"
+            exit 1
+          fi
+          ks="$GITHUB_WORKSPACE/frontend/android/app/release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ks"
+          cat > frontend/android/key.properties <<EOF
+          storeFile=$ks
+          storePassword=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          keyPassword=$ANDROID_KEY_PASSWORD
+          EOF
+
+      # flugo build android produces the APK (direct-download / self-hosted F-Droid).
+      # flugo does NOT build an AAB, so we add `flutter build appbundle` for the Play
+      # bundle — it reuses the backend .so flugo already placed in jniLibs (no cgo
+      # rebuild). Both are release-signed via key.properties when present.
+      - name: Build APK + AAB
+        run: |
+          set -eo pipefail
           export PATH="$PATH:$(go env GOPATH)/bin"
-          # RISK: debug-signed (build.gradle.kts release uses the debug keystore).
-          # Release signing = generate a keystore + add ANDROID_KEYSTORE_* secrets
-          # + a release signingConfig (fast-follow).
           flugo generate            # bridge.gen.* are gitignored — regenerate them
           flugo build android --release
+          ( cd frontend && flutter build appbundle --release )
+          mkdir -p dist
           APK="$(find frontend/build -name 'app-release.apk' | head -1)"
           test -n "$APK"
-          mkdir -p dist
           cp "$APK" "dist/Instacrypt-App-android-${TAG}.apk"
+          AAB="$(find frontend/build -name 'app-release.aab' | head -1)"
+          test -n "$AAB"
+          cp "$AAB" "dist/Instacrypt-App-android-${TAG}.aab"
+          # Guard: on a real release the APK must NOT be debug-signed.
+          if [ "${{ github.event_name }}" = "release" ]; then
+            if "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$APK" 2>/dev/null | grep -qi 'CN=Android Debug'; then
+              echo "::error::release APK is debug-signed — check the ANDROID_KEYSTORE_* secrets"; exit 1
+            fi
+          fi
 
       - uses: actions/upload-artifact@v6
         with:

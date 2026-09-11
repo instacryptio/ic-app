@@ -3,7 +3,7 @@
 // as dialogs.dart / home_controller.dart / profile_flow.dart.
 //
 // Desktop: chalresp talks to the device synchronously inside each crypto
-// op via libykpers — none of this code runs except `ensureHWForNewIdentity`
+// op via go-hid — none of this code runs except `ensureHWForNewIdentity`
 // (which falls back to the existing presence-loop).
 //
 // Mobile: the Go side can't reach NFC. The Dart layer does the dance:
@@ -67,7 +67,7 @@ Future<bool> prepareHWForIdentity(BuildContext context, String identityName) asy
 /// and the cached response (derives the KEK).
 ///
 /// Desktop: no-op (desktop CreateKeys path generates + persists the
-/// challenge inline via libykpers).
+/// challenge inline via go-hid).
 Future<bool> prepareHWForNewIdentity(BuildContext context, String identityName) async {
   if (!Platform.isAndroid && !Platform.isIOS) return true;
   if (identityName.isEmpty) return true;
@@ -88,7 +88,7 @@ Future<bool> prepareHWForNewIdentity(BuildContext context, String identityName) 
 /// ensureHWForNewIdentity is the platform-dispatch entry point used by
 /// `_createKeys` in app.dart. On mobile, drives the NFC tap dance via
 /// prepareHWForNewIdentity. On desktop, runs the existing
-/// is-a-key-plugged-in presence loop (so CreateKeys' libykpers smoke
+/// is-a-key-plugged-in presence loop (so CreateKeys' go-hid smoke
 /// test doesn't fail with a confusing "no device" error after the user
 /// already submitted the create form).
 Future<bool> ensureHWForNewIdentity(BuildContext context, String identityName) async {

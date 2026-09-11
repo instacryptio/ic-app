@@ -556,7 +556,7 @@ func (s *IcfxService) CreateKeys(name, alias, email, firstName, lastName string,
 	}
 
 	// HW setup, if requested. Dispatches desktop vs mobile internally —
-	// desktop uses libykpers inline (presence + IsSlot2Programmed +
+	// desktop uses go-hid inline (presence + IsSlot2Programmed +
 	// EnsureChallenge + smoke test); mobile consumes the Dart-prepared
 	// challenge + response from the per-name caches.
 	var hwDec *keystore.HardwareKeyDecorator
@@ -1318,7 +1318,7 @@ func profileHWRestoreFactory() profile.HWRestoreFactoryFn {
 // cache a passphrase); callers may also call ClearHWResponse(name) to drop it
 // early (e.g. a canceled flow).
 //
-// No-op on desktop (the desktop path uses libykpers directly via
+// No-op on desktop (the desktop path uses go-hid directly via
 // openDesktopHWChalresp; the cache is only consulted on android/ios).
 func (s *IcfxService) InjectHWResponse(identityName, serial, family string) error {
 	if identityName == "" {
@@ -1430,7 +1430,7 @@ func (s *IcfxService) GenerateHWChallenge(identityName string) ([]byte, error) {
 
 // setupHWForNewIdentity builds the HardwareKeyDecorator for a brand-new
 // HW-protected identity. Dispatches to platform-specific impls — desktop
-// drives the device via libykpers; mobile reads the Dart-prepared
+// drives the device via go-hid; mobile reads the Dart-prepared
 // challenge + response from the per-name caches.
 func setupHWForNewIdentity(name, backend string) (*keystore.HardwareKeyDecorator, error) {
 	if runtime.GOOS == "android" || runtime.GOOS == "ios" {
@@ -1468,7 +1468,7 @@ func setupHWForNewIdentityMobile(name, backend string) (*keystore.HardwareKeyDec
 	return dec, nil
 }
 
-// setupHWForNewIdentityDesktop is the libykpers-driven setup path —
+// setupHWForNewIdentityDesktop is the go-hid-driven setup path —
 // detect device, confirm slot 2 is programmed, generate a fresh
 // challenge file, run a smoke test against the device. Body lifted from
 // the previous inline block in CreateKeys; behavior unchanged.

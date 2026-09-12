@@ -36,7 +36,7 @@ permissions:
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.10
+  FLUGO_VERSION: v0.1.11
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -129,14 +129,15 @@ jobs:
           flugo package linux
           TAR="$(find frontend/build build -name '*.tar.gz' | head -1)"
           test -n "$TAR"
-          cp "$TAR" "dist/Instacrypt-App-Linux-${{ matrix.arch }}-${TAG}.tar.gz"
-          # AppImage is best-effort (amd64; needs icons + appimagetool, and flugo
-          # hardcodes -x86_64 so arm64 is expected to skip). Non-fatal.
+          cp "$TAR" "dist/Instacrypt-App-Linux-${{ matrix.arch }}.tar.gz"
+          # AppImage is best-effort (needs icons + appimagetool). flugo builds it
+          # per-arch now (amd64 + arm64), so both arches produce one; still
+          # non-fatal if the tooling is unavailable.
           if ( flugo icons && flugo appimage && flugo build appimage ); then
             AI="$(find build frontend/build -name '*.AppImage' | head -1 || true)"
-            [ -n "$AI" ] && cp "$AI" "dist/Instacrypt-App-Linux-${{ matrix.arch }}-${TAG}.AppImage"
+            [ -n "$AI" ] && cp "$AI" "dist/Instacrypt-App-Linux-${{ matrix.arch }}.AppImage"
           else
-            echo "AppImage skipped/failed (expected on arm64 or missing tooling)"
+            echo "AppImage skipped/failed (missing tooling)"
           fi
 
       - uses: actions/upload-artifact@v6
@@ -233,7 +234,7 @@ jobs:
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
           hdiutil create -volname "Instacrypt" -srcfolder "$STAGE" -ov -format UDZO \
-            "dist/Instacrypt-App-macOS-${{ matrix.arch }}-${TAG}.dmg"
+            "dist/Instacrypt-App-macOS-${{ matrix.arch }}.dmg"
 
       - uses: actions/upload-artifact@v6
         with:
@@ -344,7 +345,7 @@ jobs:
           DefaultDirName={autopf}\Instacrypt
           DefaultGroupName=Instacrypt
           OutputDir=dist
-          OutputBaseFilename=Instacrypt-App-windows-${{ matrix.arch }}-$env:TAG
+          OutputBaseFilename=Instacrypt-App-windows-${{ matrix.arch }}
           ArchitecturesInstallIn64BitMode=x64compatible arm64
           SetupIconFile=frontend\windows\runner\resources\app_icon.ico
           UninstallDisplayIcon={app}\Instacrypt.exe
@@ -444,10 +445,10 @@ jobs:
           mkdir -p dist
           APK="$(find frontend/build -name 'app-release.apk' | head -1)"
           test -n "$APK"
-          cp "$APK" "dist/Instacrypt-App-android-${TAG}.apk"
+          cp "$APK" "dist/Instacrypt-App-android.apk"
           AAB="$(find frontend/build -name 'app-release.aab' | head -1)"
           test -n "$AAB"
-          cp "$AAB" "dist/Instacrypt-App-android-${TAG}.aab"
+          cp "$AAB" "dist/Instacrypt-App-android.aab"
           # Guard: on a real release the APK must NOT be debug-signed.
           if [ "${{ github.event_name }}" = "release" ]; then
             if "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs "$APK" 2>/dev/null | grep -qi 'CN=Android Debug'; then

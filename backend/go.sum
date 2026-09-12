@@ -35,8 +35,8 @@ github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 h1:El6M4kTTCOh6aBiKaU
 github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510/go.mod h1:pupxD2MaaD3pAXIBCelhxNneeOaAeabZDe5s4K6zSpQ=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/hkdb/flugo v0.1.10 h1:PtWBRgCi+8LFKvPELBZ78U5cCU6Tdo2NKAh0RzdcWeg=
-github.com/hkdb/flugo v0.1.10/go.mod h1:Riq+c+3tPxPY9DS9QA2pHTjJVQfuVawX4tEAhyHKAqI=
+github.com/hkdb/flugo v0.1.11 h1:8Enao5LgT6hFVufrpU4Z3NjreX1osq6o+WFbXdzXTY4=
+github.com/hkdb/flugo v0.1.11/go.mod h1:Riq+c+3tPxPY9DS9QA2pHTjJVQfuVawX4tEAhyHKAqI=
 github.com/instacryptio/go-libfido2 v1.5.4-instacrypt.2 h1:Pjui/zkMSSlTByWQFJIwW2PrAmrQ0ngBMTTH8uyjFF4=
 github.com/instacryptio/go-libfido2 v1.5.4-instacrypt.2/go.mod h1:92J9LtSBl0UyUWljElJpTbMMNhC6VeY8dshsu40qjjo=
 github.com/instacryptio/icfx v0.1.6 h1:8NUG7B4jSoevGVw8b+P3E7z/A/q3/tP9B6FbyD1ivM0=

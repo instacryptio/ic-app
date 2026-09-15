@@ -2,7 +2,7 @@
 
 **v0.1.1 - 09-15-2026**
 
-- Bumped flugo to v0.2.0
+- Bumped flugo to v0.2.1 (macOS & AppImage fixes)
 - Android build workflow fix
 
 

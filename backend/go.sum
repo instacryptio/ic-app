@@ -47,8 +47,8 @@ github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 h1:El6M4kTTCOh6aBiKaU
 github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510/go.mod h1:pupxD2MaaD3pAXIBCelhxNneeOaAeabZDe5s4K6zSpQ=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/hkdb/flugo v0.2.0 h1:4/YRsHGJADWVJyBq8EWatslwGEpVb7Xpc9sA1nuSnV8=
-github.com/hkdb/flugo v0.2.0/go.mod h1:Riq+c+3tPxPY9DS9QA2pHTjJVQfuVawX4tEAhyHKAqI=
+github.com/hkdb/flugo v0.2.1 h1:e3RmStqL1r1A/tl0MDY04D+bcGOswq5f5l2qMu658DM=
+github.com/hkdb/flugo v0.2.1/go.mod h1:Riq+c+3tPxPY9DS9QA2pHTjJVQfuVawX4tEAhyHKAqI=
 github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2s0bqwp9tc8=
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/instacryptio/go-libfido2 v1.5.4-instacrypt.2 h1:Pjui/zkMSSlTByWQFJIwW2PrAmrQ0ngBMTTH8uyjFF4=

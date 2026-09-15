@@ -34,9 +34,10 @@ permissions:
   contents: write
 
 # TAG (e.g. v0.1.0) names the assets; VER (0.1.0) is stamped into the app.
+# FLUGO_VERSION is not pinned here — each job derives it from flugo.yaml's
+# flugo_version (auto-stamped by `flugo update`) in a "Resolve flugo version" step.
 env:
   TAG: ${{ github.event.release.tag_name || inputs.tag }}
-  FLUGO_VERSION: v0.1.13
 
 jobs:
   # --- Linux amd64/arm64 -----------------------------------------------------
@@ -110,6 +111,12 @@ jobs:
           "${RUNNER_TEMP}/flutter/bin/flutter" --version   # bootstrap + confirm the tag
           "${RUNNER_TEMP}/flutter/bin/flutter" precache --linux   # pull arm64 desktop engine
 
+      - name: Resolve flugo version from flugo.yaml
+        shell: bash
+        # Single source of truth: flugo.yaml's flugo_version (auto-stamped by
+        # `flugo update`). Prepend the tag's `v`. sed (not awk) for Git Bash parity.
+        run: echo "FLUGO_VERSION=v$(sed -n 's/^flugo_version:[[:space:]]*//p' flugo.yaml)" >> "$GITHUB_ENV"
+
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}
 
@@ -180,6 +187,12 @@ jobs:
           # on macOS — IOKit/CoreFoundation, no third-party lib). scard's PC/SC framework
           # is system-provided. Only libfido2 + openssl@3 need Homebrew.
           brew install pkg-config libfido2 openssl@3
+
+      - name: Resolve flugo version from flugo.yaml
+        shell: bash
+        # Single source of truth: flugo.yaml's flugo_version (auto-stamped by
+        # `flugo update`). Prepend the tag's `v`. sed (not awk) for Git Bash parity.
+        run: echo "FLUGO_VERSION=v$(sed -n 's/^flugo_version:[[:space:]]*//p' flugo.yaml)" >> "$GITHUB_ENV"
 
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}
@@ -290,6 +303,12 @@ jobs:
             ${{ matrix.prefix }}-ntldd-git
             perl
 
+      - name: Resolve flugo version from flugo.yaml
+        shell: bash
+        # Single source of truth: flugo.yaml's flugo_version (auto-stamped by
+        # `flugo update`). Prepend the tag's `v`. sed (not awk) for Git Bash parity.
+        run: echo "FLUGO_VERSION=v$(sed -n 's/^flugo_version:[[:space:]]*//p' flugo.yaml)" >> "$GITHUB_ENV"
+
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@$env:FLUGO_VERSION
 
@@ -380,6 +399,13 @@ jobs:
           java-version: "17"
 
       - uses: android-actions/setup-android@v4
+        with:
+          # Do NOT install the legacy "tools" package (the action's default is
+          # "tools platform-tools"). Google removed "tools" from the SDK repo, so
+          # `sdkmanager tools` now fails with "Failed to find package 'tools'".
+          # platform-tools is all we need; the NDK is installed below and gradle
+          # provisions the platform/build-tools itself.
+          packages: platform-tools
 
       - name: Install Android NDK
         run: |
@@ -398,6 +424,12 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      - name: Resolve flugo version from flugo.yaml
+        shell: bash
+        # Single source of truth: flugo.yaml's flugo_version (auto-stamped by
+        # `flugo update`). Prepend the tag's `v`. sed (not awk) for Git Bash parity.
+        run: echo "FLUGO_VERSION=v$(sed -n 's/^flugo_version:[[:space:]]*//p' flugo.yaml)" >> "$GITHUB_ENV"
 
       - name: Install flugo CLI
         run: go install github.com/hkdb/flugo/cmd/flugo@${FLUGO_VERSION}

@@ -10,6 +10,18 @@ void main(List<String> args) async {
   await build(args, (input, output) async {
     if (!input.config.buildCodeAssets) return;
 
+    // Under `flugo build`, flugo already compiles the backend (honoring the
+    // CI cgo env) and bundles it into the app itself, so this hook's compile
+    // would be redundant. flugo drops a marker file to signal that; skip when
+    // present. A file is used rather than an env var because the hooks runner
+    // strips the environment (only PATH survives). `flutter run` (dev) has no
+    // marker, so it still builds the backend here as usual.
+    if (File('${input.packageRoot.toFilePath()}.flugo-skip-backend-hook')
+        .existsSync()) {
+      print('flugo: backend built by flugo; skipping hook compile.');
+      return;
+    }
+
     // packageRoot ends with a trailing slash; resolve to a clean absolute
     // path (a lingering `..` breaks the dependency URIs declared below).
     final backendDir =

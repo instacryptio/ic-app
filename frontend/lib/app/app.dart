@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:dropdown_search/dropdown_search.dart';
 import 'package:flutter/material.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../bridge/bridge.gen.dart';
 import '../bridge/filechooser.dart';
@@ -104,6 +105,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String _statusMessage = '';
   bool _isError = false;
 
+  // App version shown on the home screen — read at runtime from the build's
+  // package metadata (stamped from the release tag into pubspec.yaml by
+  // stamp-version.sh), so it tracks the release without a manual bump.
+  String _appVersion = '';
+
   // Cloud notices: invite count for the settings-gear badge plus one-shot
   // dialogs (new invites, accepted requests, key rotations/revocations).
   Timer? _noticesTimer;
@@ -129,6 +135,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       runUnlocked: _runUnlocked,
     );
     _initialize();
+    PackageInfo.fromPlatform().then((info) {
+      if (!mounted) return;
+      setState(() => _appVersion = 'v${info.version}');
+    });
     // The poll is metadata-only and returns zeros while cloud is off or
     // signed out, so it's safe to fire blindly.
     _noticesTimer = Timer.periodic(const Duration(seconds: 60), (_) => _pollCloudNotices());
@@ -1245,7 +1255,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             Image.asset('assets/logo.png', height: 80),
                             const SizedBox(height: 8),
                             Text(
-                              'v0.1.0',
+                              _appVersion,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: theme.colorScheme.onSurfaceVariant,
                               ),

@@ -1,5 +1,10 @@
 # CHANGELOG
 
+**v0.1.1 - 09-15-2026**
+
+- Bumped flugo to v0.2.0
+
+
 **v0.1.0 - 09-12-2026**
 
 - Initial commit

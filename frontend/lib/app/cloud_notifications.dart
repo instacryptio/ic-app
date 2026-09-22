@@ -146,9 +146,27 @@ class _NotificationsDrawerState extends State<_NotificationsDrawer> {
         }
         setState(() => _progress = p.pct);
       }
-      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      var decoded = jsonDecode(raw) as Map<String, dynamic>;
       final fileName = (decoded['file_name'] as String?) ?? 'file';
       if (!mounted) return;
+
+      // A failed signature holds the plaintext back: ask, then commit (which
+      // also consumes the share) or discard — nothing has reached the
+      // destination and the share stays in the inbox until kept.
+      if (decoded['verify_failed'] == true) {
+        setState(() => _busyID = null);
+        final keep = await showSignatureFailedDialog(
+            context, (decoded['verify_msg'] as String?) ?? '');
+        if (!mounted) return;
+        if (!keep) {
+          await cloudService.discardReceive(raw);
+          setState(() => _error = 'Signature verification failed. Nothing was saved.');
+          return;
+        }
+        setState(() => _busyID = id);
+        raw = await cloudService.commitReceive(raw, force);
+        decoded = jsonDecode(raw) as Map<String, dynamic>;
+      }
 
       final result = await fileChooserService.handleWriteResult(raw, fileName);
       if (result.exists) {

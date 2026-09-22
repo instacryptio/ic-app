@@ -421,6 +421,34 @@ Future<bool> showOverwriteConfirmDialog(BuildContext context, String path) async
   return result ?? false;
 }
 
+/// showSignatureFailedDialog asks whether to keep a decrypted file whose
+/// signature failed verification. Nothing has reached the destination yet;
+/// [detail] is the backend's verify message (claimed sender, reason).
+Future<bool> showSignatureFailedDialog(BuildContext context, String detail) async {
+  final result = await showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Signature Verification Failed'),
+      content: Text(
+        "This file's signature failed verification. Do you still want to decrypt it?"
+        '${detail.isNotEmpty ? '\n\n$detail' : ''}',
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          child: const Text('Decrypt Anyway'),
+        ),
+      ],
+    ),
+  );
+  return result ?? false;
+}
+
 /// showSuccessDialog reports successful encrypt/decrypt to the user with
 /// platform-appropriate follow-up actions (Share on mobile, Open Folder on
 /// desktop).

@@ -33,6 +33,10 @@ backend/backend
 .DS_Store
 Thumbs.db
 
+# Local Dev
+/backend/go.local.mod
+/backend/go.local.sum
+
 # ==== flugo-managed (auto-updated by `flugo update`; do not edit inside) ====
 backend/bridge.gen.go
 backend/bridge/bridge.gen.h

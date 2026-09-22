@@ -1,5 +1,13 @@
 # CHANGELOG
 
+**v0.1.3 - 09-24-2026**
+
+- Bumped icfx to v0.1.7
+- Bumped flugo to v0.2.3 
+- A failed signature now asks "Do you still want to decrypt it?" before anything is written, for local decrypts and received shares alike; a share is consumed only if kept
+- Unknown senders and failed signatures are reported distinctly in the result dialog
+
+
 **v0.1.2 - 09-18-2026**
 
 - Bumped flugo to v0.2.2 (macOS codesign fix which fixes hw key)

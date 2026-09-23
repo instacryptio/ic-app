@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Instacrypt
-Comment=A Flugo application
+Comment=Post Quantum Ready File Encryption
 Exec=ic_app %u
 Icon=io.github.instacryptio.ic-app
 Terminal=false

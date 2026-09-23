@@ -99,8 +99,8 @@ func (s *IcfxService) Encrypt(filePath string, recipients []string, alsoSelf boo
 		}
 	}
 
-	// v3 container: streams to disk in constant memory. Metadata always travels
-	// encrypted inside the payload; the app always emits private containers (no
+	// Streams to disk in constant memory. Metadata always travels encrypted
+	// inside the payload; the app always emits private containers (no
 	// plaintext header) — automation that needs public headers uses icc's
 	// --public-meta.
 	meta := format.Metadata{
@@ -118,7 +118,7 @@ func (s *IcfxService) Encrypt(filePath string, recipients []string, alsoSelf boo
 
 	targetPath := filePath + ".icfx"
 	result, err := filechooser.WriteFileStream(targetPath, force, func(w io.Writer) error {
-		return encrypt.EncryptStream(w, in, recipientKeys, unlocked, meta, format.ProfilePrivateStreaming)
+		return encrypt.EncryptStream(w, in, recipientKeys, unlocked, meta, format.ProfilePrivate)
 	})
 	if err != nil {
 		return "", fmt.Errorf("writing output: %w", err)
@@ -138,16 +138,24 @@ type encryptResult struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// Decrypt decrypts an encrypted file.
 // decryptResult extends WriteResult with verification info for the Dart side.
+//
+// When the signature fails verification the plaintext is NOT promoted to its
+// destination: VerifyFailed is set, Pending names the finished temp file, and
+// WriteResult is empty. The Dart side asks the user and hands the whole JSON
+// back to CommitDecrypt (promote) or DiscardDecrypt (remove).
 type decryptResult struct {
 	filechooser.WriteResult
-	VerifyMsg      string `json:"verify_msg,omitempty"`
-	RevokedWarning string `json:"revoked_warning,omitempty"`
+	VerifyMsg      string                    `json:"verify_msg,omitempty"`
+	RevokedWarning string                    `json:"revoked_warning,omitempty"`
+	VerifyFailed   bool                      `json:"verify_failed,omitempty"`
+	Pending        *filechooser.PendingWrite `json:"pending,omitempty"`
 }
 
 // Decrypt decrypts an encrypted file.
-// Returns a JSON decryptResult (extends WriteResult) for the Dart-side handleWriteResult().
+// Returns a JSON decryptResult (extends WriteResult) for the Dart-side
+// handleWriteResult() — or, on a failed signature, a decryptResult with
+// verify_failed set for the Dart side to confirm (see decryptResult).
 //
 // identityName resolves against name/email/nickname for the user's own
 // identities; empty falls back to the configured default.
@@ -243,7 +251,10 @@ func (s *IcfxService) Decrypt(filePath, identityName string, force bool) (string
 		}
 	}
 
-	wr, err := filechooser.WriteFileStream(targetPath, force, produce)
+	// The verdict is only known once the whole plaintext is out, so it is
+	// written to a temp file first and promoted only if the signature holds
+	// (or the user says so).
+	pending, err := filechooser.WriteFileStreamDeferred(targetPath, force, produce)
 	if err != nil {
 		return "", err
 	}
@@ -252,18 +263,71 @@ func (s *IcfxService) Decrypt(filePath, identityName string, force bool) (string
 	if target.Status == identity.StatusRevoked {
 		revokedWarning = fmt.Sprintf("WARNING: Decrypted using revoked identity '%s'", target.Name)
 	}
-
 	result := decryptResult{
-		WriteResult:    wr,
 		VerifyMsg:      verifyMsgFor(verifyResult),
 		RevokedWarning: revokedWarning,
 	}
+	if verifyResult.Status == decrypt.VerifyFailed && !pending.Exists {
+		result.VerifyFailed = true
+		result.Pending = &pending
+		return marshalJSON(result)
+	}
+	wr, err := filechooser.CommitFile(pending, force)
+	if err != nil {
+		return "", err
+	}
+	result.WriteResult = wr
+	return marshalJSON(result)
+}
 
-	resultJSON, err := json.Marshal(result)
+// CommitDecrypt promotes a decrypt that Decrypt held back for a failed
+// signature, after the user chose to keep it. resultJSON is the decryptResult
+// Decrypt returned; the same shape comes back with WriteResult filled in for
+// handleWriteResult(). If the destination appeared in the meantime (native
+// desktop, force=false) the temp file is dropped and Exists is reported so the
+// UI can re-run with force.
+func (s *IcfxService) CommitDecrypt(resultJSON string, force bool) (string, error) {
+	var result decryptResult
+	if err := json.Unmarshal([]byte(resultJSON), &result); err != nil {
+		return "", fmt.Errorf("parsing decrypt result: %w", err)
+	}
+	if result.Pending == nil {
+		return "", fmt.Errorf("nothing to commit")
+	}
+	wr, err := filechooser.CommitFile(*result.Pending, force)
+	if err != nil {
+		return "", err
+	}
+	if wr.Exists {
+		_ = filechooser.DiscardFile(*result.Pending)
+	}
+	result.WriteResult = wr
+	result.VerifyFailed = false
+	result.Pending = nil
+	return marshalJSON(result)
+}
+
+// DiscardDecrypt removes a decrypt that Decrypt held back for a failed
+// signature, after the user chose not to keep it. Nothing ever reached the
+// destination.
+func (s *IcfxService) DiscardDecrypt(resultJSON string) error {
+	var result decryptResult
+	if err := json.Unmarshal([]byte(resultJSON), &result); err != nil {
+		return fmt.Errorf("parsing decrypt result: %w", err)
+	}
+	if result.Pending == nil {
+		return nil
+	}
+	return filechooser.DiscardFile(*result.Pending)
+}
+
+// marshalJSON encodes a bridge result for the Dart side.
+func marshalJSON(v any) (string, error) {
+	out, err := json.Marshal(v)
 	if err != nil {
 		return "", fmt.Errorf("marshaling result: %w", err)
 	}
-	return string(resultJSON), nil
+	return string(out), nil
 }
 
 // verifyMsgFor renders an icfx/decrypt VerifyResult as the app's verify_msg
@@ -279,12 +343,18 @@ func verifyMsgFor(v decrypt.VerifyResult) string {
 		default:
 			return fmt.Sprintf("Signature verified (contact: %s)", v.SignerAlias)
 		}
-	case decrypt.VerifyNoMetadata:
-		return "WARNING: Signature could not be verified! Private pre-v2 container carries no sender metadata"
-	case decrypt.VerifyUnverifiable:
-		return "WARNING: Signature could not be verified! Sender: " + v.SignerFP
-	default: // VerifyUnsigned
+	case decrypt.VerifyFailed:
+		msg := "Signature verification FAILED: the file may have been tampered with, or it predates the current signing scheme"
+		if v.SignerFP != "" {
+			msg += " (claimed sender: " + v.SignerFP + ")"
+		}
+		return msg
+	case decrypt.VerifyUnknownSigner:
+		return "WARNING: Signed by an unknown sender (" + v.SignerFP + "); import their lock to verify"
+	case decrypt.VerifyUnsigned:
 		return ""
+	default:
+		return "Signature status: " + v.Status.String()
 	}
 }
 

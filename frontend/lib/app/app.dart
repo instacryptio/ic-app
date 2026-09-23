@@ -668,6 +668,33 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       _setStatus('');
       if (!mounted) return;
 
+      // A failed signature holds the plaintext back in a temp file: ask, then
+      // promote (commit) or drop (discard) — nothing has reached the
+      // destination yet.
+      var decoded = jsonDecode(resultJSON) as Map<String, dynamic>;
+      if (_isDecryptMode && decoded['verify_failed'] == true) {
+        setState(() => _isLoading = false);
+        final keep = await showSignatureFailedDialog(
+            context, (decoded['verify_msg'] as String?) ?? '');
+        if (!mounted) return;
+        if (!keep) {
+          await icfxService.discardDecrypt(resultJSON);
+          _setStatus('Signature verification failed. Nothing was written.', isError: true);
+          return;
+        }
+        setState(() => _isLoading = true);
+        try {
+          resultJSON = await icfxService.commitDecrypt(resultJSON, force);
+        } catch (_) {
+          // The plaintext temp must not outlive a failed commit.
+          try {
+            await icfxService.discardDecrypt(resultJSON);
+          } catch (_) {}
+          rethrow;
+        }
+        decoded = jsonDecode(resultJSON) as Map<String, dynamic>;
+      }
+
       final result = await fileChooserService.handleWriteResult(resultJSON, suggestedName);
 
       // File exists — ask user to confirm overwrite
@@ -680,7 +707,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         return;
       }
 
-      if (result.cancelled || !mounted) return;
+      if (result.cancelled) {
+        // Nothing was saved; drop the temp copy rather than leave plaintext
+        // (or ciphertext) in the app temp directory.
+        fileChooserService.cleanupTemp(result);
+        return;
+      }
+      if (!mounted) return;
       if (result.error != null) {
         _setStatus(result.error!, isError: true);
         return;
@@ -688,7 +721,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
       // Build message with optional verify/warning info from decrypt
       var message = _isDecryptMode ? 'Decrypted successfully' : 'Encrypted successfully';
-      final decoded = jsonDecode(resultJSON) as Map<String, dynamic>;
       final verifyMsg = decoded['verify_msg'] as String? ?? '';
       final revokedWarning = decoded['revoked_warning'] as String? ?? '';
       if (verifyMsg.isNotEmpty) message += '\n$verifyMsg';

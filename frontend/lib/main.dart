@@ -85,12 +85,43 @@ Future<void> _initDeepLinks(List<String> args) async {
   appLinks.uriLinkStream.listen(_dispatchDeepLink);
 }
 
+/// _privateSocketDir picks a directory only this user can write to for the
+/// single-instance socket: the session runtime dir, else the app's own data
+/// dir (created 0700). Never the shared system temp — there another local
+/// user could pre-create the socket name and receive or inject deep links.
+/// The protection is the directory's ownership: nobody else can create a
+/// socket in it or connect to one inside it.
+Future<String?> _privateSocketDir() async {
+  final env = Platform.environment;
+  final runtime = env['XDG_RUNTIME_DIR'];
+  if (runtime != null && runtime.isNotEmpty) return runtime;
+  final dataHome = env['XDG_DATA_HOME'];
+  final home = env['HOME'];
+  final String base;
+  if (dataHome != null && dataHome.isNotEmpty) {
+    base = dataHome;
+  } else if (home != null && home.isNotEmpty) {
+    base = '$home/.local/share';
+  } else {
+    return null;
+  }
+  final dir = Directory('$base/ic_app');
+  try {
+    await dir.create(recursive: true);
+    await Process.run('chmod', ['700', dir.path]);
+  } catch (_) {
+    return null;
+  }
+  return dir.path;
+}
+
 /// _linuxSingleInstance forwards a second launch (e.g. a clicked link) to
 /// the running instance over a unix socket and exits it; the first instance
 /// listens and dispatches forwarded URIs after focusing the window.
 Future<void> _linuxSingleInstance(List<String> args) async {
   if (!Platform.isLinux) return;
-  final runtimeDir = Platform.environment['XDG_RUNTIME_DIR'] ?? Directory.systemTemp.path;
+  final runtimeDir = await _privateSocketDir();
+  if (runtimeDir == null) return; // nowhere private for the socket; cold-start links still work
   final sockPath = '$runtimeDir/ic_app-deeplink.sock';
   final addr = InternetAddress(sockPath, type: InternetAddressType.unix);
 

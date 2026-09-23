@@ -124,12 +124,17 @@ func (s *CloudService) DeleteNotification(id string) error {
 }
 
 // receiveResult mirrors decryptResult so the Dart side reuses the same
-// handleWriteResult + success-dialog handling as a local decrypt.
+// handleWriteResult + success-dialog handling as a local decrypt — including
+// the failed-signature hold: VerifyFailed + Pending come back for the user to
+// confirm, then the whole JSON goes to CommitReceive or DiscardReceive.
 type receiveResult struct {
 	filechooser.WriteResult
-	VerifyMsg string `json:"verify_msg,omitempty"`
-	FileName  string `json:"file_name"`
-	Sender    string `json:"sender,omitempty"`
+	VerifyMsg    string                    `json:"verify_msg,omitempty"`
+	FileName     string                    `json:"file_name"`
+	Sender       string                    `json:"sender,omitempty"`
+	ShareID      string                    `json:"share_id"`
+	VerifyFailed bool                      `json:"verify_failed,omitempty"`
+	Pending      *filechooser.PendingWrite `json:"pending,omitempty"`
 }
 
 // receiveShare downloads a share, decrypts it with the identity matching the
@@ -204,12 +209,14 @@ func (s *CloudService) receiveShare(shareID, destDir string, force bool, onProgr
 		target = filepath.Join(destDir, name)
 	}
 
-	// Decrypt straight into the output writer. Shares carry the icfx container
+	// Decrypt into a held-back temp file. Shares carry the icfx container
 	// (signature verified against contacts, like a local decrypt); bare age is
-	// the legacy fallback. A failed attempt writes nothing before erroring, so
-	// the self-share fallback can retry other identities on the same writer.
-	var verifyMsg string
-	wr, err := filechooser.WriteFileStream(target, force, func(w io.Writer) error {
+	// the fallback. A failed attempt writes nothing before erroring, so the
+	// self-share fallback can retry other identities on the same writer. The
+	// verdict is only known once the plaintext is out, so promotion to target
+	// waits for it.
+	var verify decrypt.VerifyResult
+	pending, err := filechooser.WriteFileStreamDeferred(target, force, func(w io.Writer) error {
 		// Decrypt progress = plaintext bytes written / ciphertext size (plaintext ≈
 		// ciphertext), mapped onto the second half of the bar. notifSize is the
 		// reliable total (server download FileSize may be absent).
@@ -223,50 +230,118 @@ func (s *CloudService) receiveShare(shareID, destDir string, force bool, onProgr
 				onProgress("decrypt", 0.5+0.5*p)
 			}}
 		}
-		vm, derr := s.decryptShareStream(enc, out, unlocked)
+		v, derr := s.decryptShareStream(enc, out, unlocked)
 		if derr != nil && fp == "" {
 			// Self-shares carry no identity hint (nothing left the device) — the
 			// file may be encrypted to a non-default identity, so try the rest.
-			vm, derr = s.decryptStreamWithAnyIdentity(enc, out, opened)
+			v, derr = s.decryptStreamWithAnyIdentity(enc, out, opened)
 		}
 		if derr != nil {
 			return derr
 		}
-		verifyMsg = vm
+		verify = v
 		return nil
 	})
 	if err != nil {
 		return "", shareUnlockErr(err)
 	}
 
+	result := receiveResult{VerifyMsg: verifyMsgFor(verify), FileName: name, Sender: sender, ShareID: shareID}
+
 	// Exists (native desktop, force=false): nothing was decrypted/received —
 	// the UI re-invokes with force. Don't consume the share or mark handled.
-	if wr.Exists {
-		out, merr := json.Marshal(receiveResult{WriteResult: wr, FileName: name, Sender: sender})
-		if merr != nil {
-			return "", merr
-		}
-		return string(out), nil
+	if pending.Exists {
+		result.WriteResult = filechooser.WriteResult{Path: target, Env: pending.Env, Exists: true}
+		return marshalJSON(result)
 	}
 
-	// Consume the (single-use) share only after a successful receive. Best-effort
-	// and non-fatal: the file is saved; if this fails the share may re-appear in
-	// the inbox until it expires, and a later receive will complete it.
-	_ = c.CompleteShare(ctx, shareID)
+	// A failed signature holds the file back: the user decides, and the share
+	// is consumed only if they keep it (CommitReceive). The share to consume
+	// is remembered here, keyed by the temp file, so the commit never acts on
+	// an identifier echoed back from the UI.
+	if verify.Status == decrypt.VerifyFailed {
+		result.VerifyFailed = true
+		result.Pending = &pending
+		heldShares.Store(pending.TmpPath, shareID)
+		return marshalJSON(result)
+	}
 
-	// Mark the drawer row downloaded-here (per-device; the row stays as history).
-	_ = store.MarkHandled("share:" + shareID)
-
-	out, err := json.Marshal(receiveResult{
-		WriteResult: wr,
-		VerifyMsg:   verifyMsg,
-		FileName:    name,
-		Sender:      sender,
-	})
+	wr, err := filechooser.CommitFile(pending, force)
 	if err != nil {
 		return "", err
 	}
-	return string(out), nil
+	result.WriteResult = wr
+	s.finishReceive(ctx, c, store, shareID)
+	return marshalJSON(result)
+}
+
+// finishReceive consumes the (single-use) share and marks the drawer row
+// downloaded-here, once the plaintext is at its destination. Best-effort and
+// non-fatal: the file is saved; if completing fails the share may re-appear in
+// the inbox until it expires, and a later receive will complete it.
+func (s *CloudService) finishReceive(ctx context.Context, c *cloud.Client, store *cloud.NotificationStore, shareID string) {
+	_ = c.CompleteShare(ctx, shareID)
+	// Per-device; the row stays as history.
+	_ = store.MarkHandled("share:" + shareID)
+}
+
+// heldShares maps a held-back receive's temp file to the share it came from.
+// CommitReceive consumes the share found here — never the share_id echoed
+// back in the result JSON, which the UI layer could hand back altered.
+var heldShares sync.Map
+
+// CommitReceive promotes a share receive that receiveShare held back for a
+// failed signature, after the user chose to keep it, then consumes the share.
+// resultJSON is the receiveResult that came back; the same shape returns with
+// WriteResult filled in for handleWriteResult(). A destination that appeared
+// in the meantime (native desktop, force=false) drops the temp file and
+// reports Exists so the UI can re-run with force.
+func (s *CloudService) CommitReceive(resultJSON string, force bool) (string, error) {
+	ensurePathsApplied()
+	var result receiveResult
+	if err := json.Unmarshal([]byte(resultJSON), &result); err != nil {
+		return "", fmt.Errorf("parsing receive result: %w", err)
+	}
+	if result.Pending == nil {
+		return "", fmt.Errorf("nothing to commit")
+	}
+	pending := *result.Pending
+	wr, err := filechooser.CommitFile(pending, force)
+	if err != nil {
+		return "", err
+	}
+	result.WriteResult = wr
+	result.VerifyFailed = false
+	result.Pending = nil
+	if wr.Exists {
+		_ = filechooser.DiscardFile(pending)
+		heldShares.Delete(pending.TmpPath)
+		return marshalJSON(result)
+	}
+	// The share is consumed only if this process held it back; after a
+	// restart it simply stays in the inbox until a later receive completes it.
+	if shareID, ok := heldShares.LoadAndDelete(pending.TmpPath); ok {
+		ctx := context.Background()
+		if c, cerr := s.authedClient(ctx); cerr == nil {
+			s.finishReceive(ctx, c, notifStore(), shareID.(string))
+		}
+	}
+	return marshalJSON(result)
+}
+
+// DiscardReceive removes a share receive that receiveShare held back for a
+// failed signature, after the user chose not to keep it. The share is not
+// consumed and stays in the inbox.
+func (s *CloudService) DiscardReceive(resultJSON string) error {
+	var result receiveResult
+	if err := json.Unmarshal([]byte(resultJSON), &result); err != nil {
+		return fmt.Errorf("parsing receive result: %w", err)
+	}
+	if result.Pending == nil {
+		return nil
+	}
+	heldShares.Delete(result.Pending.TmpPath)
+	return filechooser.DiscardFile(*result.Pending)
 }
 
 // ReceiveShare is the one-shot receive (no progress) used where a spinner is
@@ -353,18 +428,18 @@ func shareUnlockErr(err error) error {
 
 // decryptShareStream decrypts one downloaded share (from a seekable ciphertext
 // temp file) with one identity, streaming the plaintext to dst. icfx containers
-// run the full parse + signature-verify path; bare age is the legacy fallback.
-// Returns the verify message (empty for bare age). On failure (e.g. wrong
-// recipient) it fails BEFORE writing any plaintext to dst, so a caller may retry
-// with another identity on the same dst.
-func (s *CloudService) decryptShareStream(src io.ReadSeeker, dst io.Writer, unlocked *identity.Unlocked) (string, error) {
+// run the full parse + signature-verify path; bare age is the fallback.
+// Returns the verification verdict (VerifyUnsigned for bare age). On failure
+// (e.g. wrong recipient) it fails BEFORE writing any plaintext to dst, so a
+// caller may retry with another identity on the same dst.
+func (s *CloudService) decryptShareStream(src io.ReadSeeker, dst io.Writer, unlocked *identity.Unlocked) (decrypt.VerifyResult, error) {
 	if _, err := src.Seek(0, io.SeekStart); err != nil {
-		return "", err
+		return decrypt.VerifyResult{}, err
 	}
 	head := make([]byte, 64)
 	n, _ := io.ReadFull(src, head)
 	if _, err := src.Seek(0, io.SeekStart); err != nil {
-		return "", err
+		return decrypt.VerifyResult{}, err
 	}
 	switch format.Detect(head[:n]) {
 	case format.FormatICFX:
@@ -372,20 +447,16 @@ func (s *CloudService) decryptShareStream(src io.ReadSeeker, dst io.Writer, unlo
 		if cstore, cerr := newContactStore(); cerr == nil {
 			contactList, _ = cstore.Load()
 		}
-		res, err := decrypt.DecryptAndVerifyStream(src, dst, unlocked, contactList)
-		if err != nil {
-			return "", err
-		}
-		return verifyMsgFor(res), nil
+		return decrypt.DecryptAndVerifyStream(src, dst, unlocked, contactList)
 	default:
 		r, err := unlocked.DecryptStream(src)
 		if err != nil {
-			return "", err
+			return decrypt.VerifyResult{}, err
 		}
 		if _, err := io.Copy(dst, r); err != nil {
-			return "", err
+			return decrypt.VerifyResult{}, err
 		}
-		return "", nil
+		return decrypt.VerifyResult{Status: decrypt.VerifyUnsigned}, nil
 	}
 }
 
@@ -393,14 +464,14 @@ func (s *CloudService) decryptShareStream(src io.ReadSeeker, dst io.Writer, unlo
 // self-shares, which deliberately carry no identity hint. It re-seeks src for
 // each attempt; a failed attempt writes nothing before erroring, so retrying on
 // the same dst is safe.
-func (s *CloudService) decryptStreamWithAnyIdentity(src io.ReadSeeker, dst io.Writer, opened map[string]*identity.Unlocked) (string, error) {
+func (s *CloudService) decryptStreamWithAnyIdentity(src io.ReadSeeker, dst io.Writer, opened map[string]*identity.Unlocked) (decrypt.VerifyResult, error) {
 	store, err := newIdentityStore()
 	if err != nil {
-		return "", err
+		return decrypt.VerifyResult{}, err
 	}
 	entries, err := store.LoadIndex()
 	if err != nil {
-		return "", fmt.Errorf("loading identity index: %w", err)
+		return decrypt.VerifyResult{}, fmt.Errorf("loading identity index: %w", err)
 	}
 	var lastErr error
 	for _, idx := range entries {
@@ -413,14 +484,21 @@ func (s *CloudService) decryptStreamWithAnyIdentity(src io.ReadSeeker, dst io.Wr
 			}
 			opened[idx.Name] = u
 		}
-		vm, derr := s.decryptShareStream(src, dst, u)
+		// Only an attempt that wrote nothing may be followed by another on the
+		// same dst; a failure after bytes were written (a corrupt chunk mid-
+		// stream) is final, or the retry would append to a partial file.
+		cw := &countingWriter{w: dst, cb: func(int64) {}}
+		v, derr := s.decryptShareStream(src, cw, u)
 		if derr == nil {
-			return vm, nil
+			return v, nil
+		}
+		if cw.n > 0 {
+			return decrypt.VerifyResult{}, derr
 		}
 		lastErr = derr
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no identities available")
 	}
-	return "", lastErr
+	return decrypt.VerifyResult{}, lastErr
 }

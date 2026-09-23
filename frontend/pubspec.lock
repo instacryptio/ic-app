@@ -316,8 +316,8 @@ packages:
     dependency: "direct main"
     description:
       path: "plugins/hardware_key"
-      ref: "v0.2.2"
-      resolved-ref: "12d1a9413ef855500dfafd0d87e510c61ea9235b"
+      ref: "v0.2.5"
+      resolved-ref: d92ef467b407079eee919e011f2bcb44c469715e
       url: "https://github.com/hkdb/flugo.git"
     source: git
     version: "0.1.0"
@@ -890,8 +890,8 @@ packages:
     dependency: "direct main"
     description:
       path: "plugins/webauthn"
-      ref: "v0.2.2"
-      resolved-ref: "12d1a9413ef855500dfafd0d87e510c61ea9235b"
+      ref: "v0.2.5"
+      resolved-ref: d92ef467b407079eee919e011f2bcb44c469715e
       url: "https://github.com/hkdb/flugo.git"
     source: git
     version: "0.1.0"

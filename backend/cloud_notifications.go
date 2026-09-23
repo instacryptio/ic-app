@@ -256,10 +256,13 @@ func (s *CloudService) receiveShare(shareID, destDir string, force bool, onProgr
 	}
 
 	// A failed signature holds the file back: the user decides, and the share
-	// is consumed only if they keep it (CommitReceive).
+	// is consumed only if they keep it (CommitReceive). The share to consume
+	// is remembered here, keyed by the temp file, so the commit never acts on
+	// an identifier echoed back from the UI.
 	if verify.Status == decrypt.VerifyFailed {
 		result.VerifyFailed = true
 		result.Pending = &pending
+		heldShares.Store(pending.TmpPath, shareID)
 		return marshalJSON(result)
 	}
 
@@ -282,6 +285,11 @@ func (s *CloudService) finishReceive(ctx context.Context, c *cloud.Client, store
 	_ = store.MarkHandled("share:" + shareID)
 }
 
+// heldShares maps a held-back receive's temp file to the share it came from.
+// CommitReceive consumes the share found here — never the share_id echoed
+// back in the result JSON, which the UI layer could hand back altered.
+var heldShares sync.Map
+
 // CommitReceive promotes a share receive that receiveShare held back for a
 // failed signature, after the user chose to keep it, then consumes the share.
 // resultJSON is the receiveResult that came back; the same shape returns with
@@ -297,7 +305,8 @@ func (s *CloudService) CommitReceive(resultJSON string, force bool) (string, err
 	if result.Pending == nil {
 		return "", fmt.Errorf("nothing to commit")
 	}
-	wr, err := filechooser.CommitFile(*result.Pending, force)
+	pending := *result.Pending
+	wr, err := filechooser.CommitFile(pending, force)
 	if err != nil {
 		return "", err
 	}
@@ -305,12 +314,17 @@ func (s *CloudService) CommitReceive(resultJSON string, force bool) (string, err
 	result.VerifyFailed = false
 	result.Pending = nil
 	if wr.Exists {
-		_ = filechooser.DiscardFile(*result.Pending)
+		_ = filechooser.DiscardFile(pending)
+		heldShares.Delete(pending.TmpPath)
 		return marshalJSON(result)
 	}
-	ctx := context.Background()
-	if c, cerr := s.authedClient(ctx); cerr == nil {
-		s.finishReceive(ctx, c, notifStore(), result.ShareID)
+	// The share is consumed only if this process held it back; after a
+	// restart it simply stays in the inbox until a later receive completes it.
+	if shareID, ok := heldShares.LoadAndDelete(pending.TmpPath); ok {
+		ctx := context.Background()
+		if c, cerr := s.authedClient(ctx); cerr == nil {
+			s.finishReceive(ctx, c, notifStore(), shareID.(string))
+		}
 	}
 	return marshalJSON(result)
 }
@@ -326,6 +340,7 @@ func (s *CloudService) DiscardReceive(resultJSON string) error {
 	if result.Pending == nil {
 		return nil
 	}
+	heldShares.Delete(result.Pending.TmpPath)
 	return filechooser.DiscardFile(*result.Pending)
 }
 
@@ -469,9 +484,16 @@ func (s *CloudService) decryptStreamWithAnyIdentity(src io.ReadSeeker, dst io.Wr
 			}
 			opened[idx.Name] = u
 		}
-		v, derr := s.decryptShareStream(src, dst, u)
+		// Only an attempt that wrote nothing may be followed by another on the
+		// same dst; a failure after bytes were written (a corrupt chunk mid-
+		// stream) is final, or the retry would append to a partial file.
+		cw := &countingWriter{w: dst, cb: func(int64) {}}
+		v, derr := s.decryptShareStream(src, cw, u)
 		if derr == nil {
 			return v, nil
+		}
+		if cw.n > 0 {
+			return decrypt.VerifyResult{}, derr
 		}
 		lastErr = derr
 	}

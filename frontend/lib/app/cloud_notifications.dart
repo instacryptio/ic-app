@@ -164,7 +164,15 @@ class _NotificationsDrawerState extends State<_NotificationsDrawer> {
           return;
         }
         setState(() => _busyID = id);
-        raw = await cloudService.commitReceive(raw, force);
+        try {
+          raw = await cloudService.commitReceive(raw, force);
+        } catch (_) {
+          // The plaintext temp must not outlive a failed commit.
+          try {
+            await cloudService.discardReceive(raw);
+          } catch (_) {}
+          rethrow;
+        }
         decoded = jsonDecode(raw) as Map<String, dynamic>;
       }
 
@@ -177,7 +185,13 @@ class _NotificationsDrawerState extends State<_NotificationsDrawer> {
         await _decrypt(item, force: true);
         return;
       }
-      if (result.cancelled || !mounted) return;
+      if (result.cancelled) {
+        // Nothing was saved; drop the temp copy rather than leave plaintext
+        // in the app temp directory.
+        fileChooserService.cleanupTemp(result);
+        return;
+      }
+      if (!mounted) return;
       if (result.error != null) {
         setState(() => _error = result.error);
         return;

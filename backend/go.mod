@@ -4,8 +4,8 @@ go 1.26.6
 
 require (
 	github.com/awnumar/memguard v0.23.0
-	github.com/hkdb/flugo v0.2.2
-	github.com/instacryptio/icfx v0.1.6
+	github.com/hkdb/flugo v0.2.5
+	github.com/instacryptio/icfx v0.1.7
 )
 
 require (

@@ -683,7 +683,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           return;
         }
         setState(() => _isLoading = true);
-        resultJSON = await icfxService.commitDecrypt(resultJSON, force);
+        try {
+          resultJSON = await icfxService.commitDecrypt(resultJSON, force);
+        } catch (_) {
+          // The plaintext temp must not outlive a failed commit.
+          try {
+            await icfxService.discardDecrypt(resultJSON);
+          } catch (_) {}
+          rethrow;
+        }
         decoded = jsonDecode(resultJSON) as Map<String, dynamic>;
       }
 
@@ -699,7 +707,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         return;
       }
 
-      if (result.cancelled || !mounted) return;
+      if (result.cancelled) {
+        // Nothing was saved; drop the temp copy rather than leave plaintext
+        // (or ciphertext) in the app temp directory.
+        fileChooserService.cleanupTemp(result);
+        return;
+      }
+      if (!mounted) return;
       if (result.error != null) {
         _setStatus(result.error!, isError: true);
         return;

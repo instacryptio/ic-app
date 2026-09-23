@@ -1,6 +1,6 @@
 # CHANGELOG
 
-**v0.1.3 - 09-24-2026**
+**v0.1.3 - 09-23-2026**
 
 - Bumped [icfx](https://github.com/instacryptio/icfx/releases) to v0.1.7
 - Bumped [flugo](https://github.com/hkdb/flugo/releases) to v0.2.5
